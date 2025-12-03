@@ -15,9 +15,9 @@ import {
 // ============================================================================
 
 const extensionName = 'memory-summarize';
-const summaryDivClass = 'qvink_memory_text'; // Class for the visual display
+const summaryDivClass = 'qvink_memory_text'; 
 
-// Inject CSS dynamically to ensure it looks right immediately
+// Inject CSS dynamically
 const styles = `
 .qvink_memory_text {
     font-size: 0.85em;
@@ -29,6 +29,10 @@ const styles = `
     font-style: italic;
     color: var(--smart-theme-body-color, #e0e0e0);
     opacity: 0.9;
+    cursor: pointer;
+}
+.qvink_memory_text:hover {
+    background-color: var(--smart-theme-bg-transfer, rgba(0, 0, 0, 0.4));
 }
 `;
 $('head').append(`<style>${styles}</style>`);
@@ -38,11 +42,19 @@ const defaultSettings = {
     autoSummarize: true,
     
     // Limits
-    messageThreshold: 50,
+    messageThreshold: 20, // Lowered threshold so short greetings get captured
+    messageLag: 0,
     
-    // Prompting
-    // - Improved prompt based on original strictness
-    summaryPrompt: `[System: You are a summarization engine. You must summarize the content of the following message into a single, concise sentence. Do not output HTML. Do not output conversational text. Output ONLY the summary.]\n\nMessage content:\n"{{message}}"\n\nSummary:`,
+    // Prompting - UPDATED TO BE STRICTER
+    // This prompt forces the AI into "System Mode" so it ignores the "Act as roleplay partner" text inside the message
+    summaryPrompt: `[System Command: You are an automated data processor. You are NOT a character. You are NOT to roleplay.
+Your task is to analyze the following text and generate a brief, objective summary of the events or information contained within.
+Do not output dialogue. Do not output flowery descriptions. Output ONLY the summary in 3rd person past tense.]
+
+Text to analyze:
+"{{message}}"
+
+Summary:`,
     
     // Display
     displayMemories: true,
@@ -85,58 +97,51 @@ function log(msg, ...args) {
 }
 
 // ============================================================================
-// CORE LOGIC: VISUALS (The missing piece)
+// CORE LOGIC: VISUALS
 // ============================================================================
 
-/**
- * - Adapted for V2
- * Adds the summary div to the chat message in the HTML
- */
 function updateMessageVisuals(index) {
     if (!get_settings('displayMemories')) return;
 
     const context = getContext();
-    // Safety check for chat existence
     if (!context.chat || !context.chat[index]) return;
 
-    // Find the message div in the DOM
     // SillyTavern puts the 'mesid' attribute on message divs
     let div_element = $(`#chat .mes[mesid="${index}"]`);
     
-    if (div_element.length === 0) return; // Not rendered yet
+    if (div_element.length === 0) return; 
 
-    // Remove existing summary if present to prevent duplicates
+    // Remove existing summary if present
     div_element.find(`.${summaryDivClass}`).remove();
 
     const message = context.chat[index];
     const summary = message.extensions?.[extensionName]?.summary;
 
     if (summary) {
-        // Find the text container (usually .mes_text)
         let message_text_div = div_element.find('.mes_text');
         
-        // Create our summary div
-        let html = `<div class="${summaryDivClass}" title="Click to edit summary">🧠 ${summary}</div>`;
+        // Visual indicator
+        let html = `<div class="${summaryDivClass}" title="Click to edit summary">📝 ${summary}</div>`;
         
-        // Append it below the text
         message_text_div.after(html);
 
-        // Add click listener to edit (Simple version)
+        // Click to Edit
         div_element.find(`.${summaryDivClass}`).on('click', async function() {
-            let newSummary = prompt("Edit Summary:", summary);
-            if (newSummary !== null && newSummary !== summary) {
+            // Using SillyTavern's Popup for better UI than browser prompt
+            const newSummary = await context.Popup.show.input('Edit Summary', 'Update the memory for this message:', summary);
+            if (newSummary !== false && newSummary !== summary) {
+                if (!message.extensions) message.extensions = {};
+                if (!message.extensions[extensionName]) message.extensions[extensionName] = {};
+                
                 message.extensions[extensionName].summary = newSummary;
                 context.saveChat();
-                updateMessageVisuals(index); // Re-render
-                refreshContext(); // Update prompts
+                updateMessageVisuals(index); 
+                refreshContext(); 
             }
         });
     }
 }
 
-/**
- * Refreshes visuals for the entire chat
- */
 function refreshAllVisuals() {
     const chat = getContext().chat;
     if (!chat) return;
@@ -146,19 +151,17 @@ function refreshAllVisuals() {
 }
 
 // ============================================================================
-// CORE LOGIC: CONTEXT INJECTION (The other missing piece)
+// CORE LOGIC: CONTEXT INJECTION
 // ============================================================================
 
-/**
- * - Adapted for V2
- * Injects the summaries into the actual prompt sent to the AI
- */
 function refreshContext() {
     if (!get_settings('enabled')) return;
 
     const context = getContext();
     const chat = context.chat;
     let summaries = [];
+
+    if (!chat) return;
 
     // Collect all summaries
     chat.forEach((msg) => {
@@ -172,16 +175,14 @@ function refreshContext() {
         return;
     }
 
-    // Join them nicely
+    // Join them
     const memoryBlock = summaries.join('\n');
-    const injectionText = `[Past Events Summary:\n${memoryBlock}\n]`;
-
-    // Inject into SillyTavern's prompt pipeline
-    // depth: 2 (usually safe), position: 0 (top of context) or 1 (bottom)
-    // You can make these settings configurable later
-    context.setExtensionPrompt(`${extensionName}`, injectionText, 0, 2, true);
     
-    log("Context updated with " + summaries.length + " memories.");
+    // This is the text injected into the LLM context
+    const injectionText = `[Past Events:\n${memoryBlock}\n]`;
+
+    // Inject: key, text, position (0=top), depth (2 messages back), scan
+    context.setExtensionPrompt(`${extensionName}`, injectionText, 0, 2, true);
 }
 
 // ============================================================================
@@ -220,17 +221,19 @@ async function triggerAutoSummarize() {
 async function generateSummaryForMessage(index, content) {
     log(`Summarizing message ${index}...`);
     
-    // - Using simple replacement for now, but strict prompt
     const rawPrompt = get_settings('summaryPrompt');
-    const prompt = rawPrompt.replace('{{message}}', content);
+    // Sanitize content slightly to prevent breaking the prompt structure
+    const safeContent = content.replace(/"/g, "'"); 
+    const prompt = rawPrompt.replace('{{message}}', safeContent);
 
     try {
-        // - Correct usage of generateQuietPrompt with object
         const result = await generateQuietPrompt({
             prompt: prompt,
             quiet: true,
             skipWIAN: true,
-            skipStats: true
+            skipStats: true,
+            // CRITICAL: We ask ST to try and use the system prompt override if supported
+            system_prompt: "You are a data processing tool. You summarize text. You do not roleplay."
         }); 
         
         if (result) {
@@ -239,7 +242,6 @@ async function generateSummaryForMessage(index, content) {
             const context = getContext();
             if (!context.chat[index].extensions) context.chat[index].extensions = {};
             
-            // Save data
             context.chat[index].extensions[extensionName] = {
                 summary: result.trim(),
                 timestamp: Date.now()
@@ -256,7 +258,7 @@ async function generateSummaryForMessage(index, content) {
 }
 
 // ============================================================================
-// UI LOGIC (HTML Loader)
+// UI LOGIC
 // ============================================================================
 
 async function load_html() {
@@ -293,12 +295,10 @@ async function load_html() {
 }
 
 function bind_ui_listeners() {
-    // Popup Controls
     $(document).off('click', '#memory-close-btn, #memory-cancel-btn').on('click', '#memory-close-btn, #memory-cancel-btn', function() {
         $('#memory-config-popup').removeClass('visible').hide();
     });
 
-    // Tab Switching
     $(document).off('click', '.memory-config-tab').on('click', '.memory-config-tab', function() {
         $('.memory-config-tab').removeClass('active');
         $(this).addClass('active');
@@ -310,10 +310,11 @@ function bind_ui_listeners() {
     // Manual Tools
     $('#memory-summarize-all').off('click').on('click', async () => {
         const chat = getContext().chat;
+        toastr.info("Starting summary of all messages...");
         for (let i = 0; i < chat.length; i++) {
             await generateSummaryForMessage(i, chat[i].mes);
         }
-        toastr.success("Summarized all messages");
+        toastr.success("Finished summarization.");
     });
 
     $('#memory-clear-all').off('click').on('click', () => {
@@ -323,6 +324,7 @@ function bind_ui_listeners() {
         });
         getContext().saveChat();
         refreshAllVisuals();
+        refreshContext();
         toastr.info("All memories cleared");
     });
 
@@ -337,8 +339,8 @@ function bind_ui_listeners() {
     $('#memory-save-btn').off('click').on('click', () => {
         $('#memory-config-popup').removeClass('visible').hide();
         saveSettingsDebounced();
-        refreshAllVisuals(); // Re-render in case colors changed
-        refreshContext();    // Re-calculate context
+        refreshAllVisuals(); 
+        refreshContext();    
         toastr.success('Settings Saved');
     });
     
@@ -412,7 +414,6 @@ jQuery(async function () {
     }, 1000);
 
     if (eventSource) {
-        // - Re-render visuals when chat changes
         eventSource.on(event_types.CHAT_CHANGED, () => {
             log('Chat changed.');
             setTimeout(() => {
@@ -421,12 +422,10 @@ jQuery(async function () {
             }, 500);
         });
 
-        // - Handle visual updates when messages render
         eventSource.on(event_types.MESSAGE_RENDERED, (id) => {
              updateMessageVisuals(id);
         });
 
-        // Trigger on AI message
         eventSource.on(event_types.MESSAGE_RECEIVED, async (data) => {
             log('Message received. Checking auto-summarize...');
             if (get_settings('autoSummarize')) {
@@ -434,7 +433,6 @@ jQuery(async function () {
             }
         });
         
-        // Trigger on User message
         eventSource.on(event_types.MESSAGE_SENT, async () => {
              if (get_settings('autoSummarize') && get_settings('includeUserMessages')) {
                  setTimeout(() => triggerAutoSummarize(), 1000);

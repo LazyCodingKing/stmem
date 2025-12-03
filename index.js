@@ -1,25 +1,12 @@
 /**
  * Memory Summarize v2.0 - Main Extension File
  * Updated for SillyTavern 1.12+ (2025)
- * No longer requires deprecated Extras API
  */
 
-import { 
-  eventSource, 
-  event_types,
-  saveSettingsDebounced,
-  callPopup,
-  getRequestHeaders
-} from '../../../script.js';
-
-import { 
-  extension_settings,
-  getContext
-} from '../../extensions.js';
-
-import {
-  power_user
-} from '../../power-user.js';
+// Import from SillyTavern - FIX: Use proper import paths
+import { eventSource, event_types, saveSettingsDebounced } from '../../../../script.js';
+import { extension_settings, getContext } from '../../../extensions.js';
+import { power_user } from '../../../power-user.js';
 
 // Extension metadata
 const extensionName = 'memory-summarize';
@@ -68,7 +55,6 @@ const defaultSettings = {
   enableInNewChats: true,
   useGlobalToggleState: false,
   
-  // New in v2.0
   incrementalUpdates: true,
   smartBatching: true,
   contextAwareInjection: true,
@@ -78,10 +64,10 @@ const defaultSettings = {
 };
 
 // Extension state
-let settings = defaultSettings;
+let settings = {};
 let memoryCache = new Map();
 let isProcessing = false;
-let processingQueue = [];
+let shouldStopProcessing = false;
 
 /**
  * Initialize extension
@@ -89,37 +75,45 @@ let processingQueue = [];
 async function init() {
   console.log(`[${extensionName}] Initializing Memory Summarize v2.0`);
   
-  // Load settings
-  if (!extension_settings[extensionName]) {
-    extension_settings[extensionName] = defaultSettings;
+  try {
+    // Load settings
+    if (!extension_settings[extensionName]) {
+      extension_settings[extensionName] = structuredClone(defaultSettings);
+    }
+    settings = extension_settings[extensionName];
+    
+    console.log(`[${extensionName}] Settings loaded:`, settings);
+    
+    // Apply CSS variables
+    applyCSSVariables();
+    
+    // Setup UI
+    await setupUI();
+    
+    // Register event listeners
+    registerEventListeners();
+    
+    // Register slash commands
+    registerSlashCommands();
+    
+    // Load memories for current chat
+    await loadMemories();
+    
+    console.log(`[${extensionName}] Initialization complete`);
+    toastr.success('Memory Summarize loaded successfully!');
+    
+  } catch (error) {
+    console.error(`[${extensionName}] Initialization failed:`, error);
+    toastr.error(`Memory Summarize failed to load: ${error.message}`);
   }
-  settings = extension_settings[extensionName];
-  
-  // Apply CSS variables
-  applyCSSVariables();
-  
-  // Setup UI
-  await setupUI();
-  
-  // Register event listeners
-  registerEventListeners();
-  
-  // Register slash commands
-  registerSlashCommands();
-  
-  // Setup context injection
-  setupContextInjection();
-  
-  // Load memories for current chat
-  await loadMemories();
-  
-  console.log(`[${extensionName}] Initialization complete`);
 }
 
 /**
  * Setup UI elements
  */
 async function setupUI() {
+  console.log(`[${extensionName}] Setting up UI`);
+  
   // Add extension button to top bar
   const button = $(`
     <div id="memory-summarize-button" class="fa-solid fa-brain menu_button" 
@@ -129,45 +123,177 @@ async function setupUI() {
   button.on('click', () => toggleConfigPopup());
   $('#extensionsMenu').append(button);
   
-  // Create config popup HTML
-  const configHTML = await fetch(`${extensionFolderPath}/config.html`)
-    .then(res => res.text())
-    .catch(() => {
-      console.warn(`[${extensionName}] Config template not found, using default`);
-      return createDefaultConfigHTML();
-    });
+  // Create simple config popup
+  const configHTML = `
+    <div class="memory-config-wrapper">
+      <div class="memory-config-header">
+        <div class="memory-config-title">
+          <i class="fa-solid fa-brain"></i>
+          Memory Summarize v2.0
+        </div>
+        <button class="memory-config-close" id="memory-close-btn">
+          <i class="fa-solid fa-times"></i>
+        </button>
+      </div>
+      <div class="memory-config-content" style="padding: 20px;">
+        <h3>Extension Status</h3>
+        <label>
+          <input type="checkbox" id="memory-enabled" ${settings.enabled ? 'checked' : ''}>
+          Enable Memory Summarize
+        </label>
+        
+        <h3>Memory Limits</h3>
+        <label>
+          Short-Term Memory Limit (tokens):
+          <input type="number" id="memory-short-term-limit" value="${settings.shortTermLimit}" min="100" max="10000" step="100">
+        </label>
+        <br>
+        <label>
+          Long-Term Memory Limit (tokens):
+          <input type="number" id="memory-long-term-limit" value="${settings.longTermLimit}" min="100" max="10000" step="100">
+        </label>
+        
+        <h3>Quick Actions</h3>
+        <button id="memory-summarize-all" class="menu_button">Summarize All Messages</button>
+        <button id="memory-clear-all" class="menu_button">Clear All Memories</button>
+        
+        <h3>Display</h3>
+        <label>
+          <input type="checkbox" id="memory-display" ${settings.displayMemories ? 'checked' : ''}>
+          Show summaries below messages
+        </label>
+      </div>
+      <div class="memory-config-footer" style="padding: 10px; border-top: 1px solid #ccc;">
+        <button id="memory-save-btn" class="menu_button">Save Settings</button>
+        <button id="memory-cancel-btn" class="menu_button">Cancel</button>
+      </div>
+    </div>
+  `;
   
-  $('body').append(`<div id="memory-config-popup">${configHTML}</div>`);
+  $('body').append(`<div id="memory-config-popup" style="display: none;">${configHTML}</div>`);
   
-  // Bind settings to UI
-  bindSettingsToUI();
+  // Bind UI events
+  bindUI();
   
-  // Add memory display to chat messages
-  if (settings.displayMemories) {
+  console.log(`[${extensionName}] UI setup complete`);
+}
+
+/**
+ * Bind UI event handlers
+ */
+function bindUI() {
+  $('#memory-close-btn, #memory-cancel-btn').on('click', () => {
+    $('#memory-config-popup').hide();
+  });
+  
+  $('#memory-save-btn').on('click', () => {
+    saveSettings();
+    $('#memory-config-popup').hide();
+    toastr.success('Settings saved!');
+  });
+  
+  $('#memory-enabled').on('change', function() {
+    settings.enabled = $(this).prop('checked');
+  });
+  
+  $('#memory-short-term-limit').on('change', function() {
+    settings.shortTermLimit = parseInt($(this).val());
+  });
+  
+  $('#memory-long-term-limit').on('change', function() {
+    settings.longTermLimit = parseInt($(this).val());
+  });
+  
+  $('#memory-display').on('change', function() {
+    settings.displayMemories = $(this).prop('checked');
     updateMemoryDisplay();
+  });
+  
+  $('#memory-summarize-all').on('click', async () => {
+    if (confirm('Summarize all messages? This may take a while.')) {
+      await triggerAutoSummarization();
+    }
+  });
+  
+  $('#memory-clear-all').on('click', async () => {
+    if (confirm('Clear all memories? This cannot be undone.')) {
+      memoryCache.clear();
+      await saveMemories();
+      updateMemoryDisplay();
+      toastr.success('All memories cleared');
+    }
+  });
+}
+
+/**
+ * Toggle config popup
+ */
+function toggleConfigPopup() {
+  const popup = $('#memory-config-popup');
+  if (popup.is(':visible')) {
+    popup.hide();
+  } else {
+    popup.show();
   }
+}
+
+/**
+ * Save settings
+ */
+function saveSettings() {
+  extension_settings[extensionName] = settings;
+  saveSettingsDebounced();
+}
+
+/**
+ * Apply CSS variables
+ */
+function applyCSSVariables() {
+  const root = document.documentElement;
+  root.style.setProperty('--qm-short', settings.colorShortTerm);
+  root.style.setProperty('--qm-long', settings.colorLongTerm);
+  root.style.setProperty('--qm-old', settings.colorOutOfContext);
+  root.style.setProperty('--qm-excluded', settings.colorExcluded);
 }
 
 /**
  * Register event listeners
  */
 function registerEventListeners() {
-  // Message events
+  console.log(`[${extensionName}] Registering event listeners`);
+  
   eventSource.on(event_types.MESSAGE_RECEIVED, handleMessageReceived);
   eventSource.on(event_types.MESSAGE_SENT, handleMessageSent);
-  eventSource.on(event_types.USER_MESSAGE_RENDERED, updateMemoryDisplay);
-  eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, updateMemoryDisplay);
-  
-  // Chat events
   eventSource.on(event_types.CHAT_CHANGED, handleChatChanged);
+}
+
+/**
+ * Register slash commands
+ */
+function registerSlashCommands() {
+  console.log(`[${extensionName}] Registering slash commands`);
   
-  // Generation events
-  if (settings.summarizeTiming === 'before_generation') {
-    eventSource.on(event_types.GENERATION_AFTER_COMMANDS, triggerAutoSummarization);
-  }
+  // Basic commands
+  window.SlashCommandParser?.addCommand('qm-enabled', () => {
+    return String(settings.enabled);
+  }, [], '– check if extension is enabled');
   
-  // Settings events
-  eventSource.on(event_types.SETTINGS_UPDATED, handleSettingsUpdated);
+  window.SlashCommandParser?.addCommand('qm-toggle', (args) => {
+    if (args.enabled !== undefined) {
+      settings.enabled = args.enabled === 'true';
+    } else {
+      settings.enabled = !settings.enabled;
+    }
+    saveSettings();
+    toastr.info(`Memory Summarize ${settings.enabled ? 'enabled' : 'disabled'}`);
+    return String(settings.enabled);
+  }, [], '– toggle extension on/off');
+  
+  window.SlashCommandParser?.addCommand('qm-summarize', async (args) => {
+    const index = args.index !== undefined ? parseInt(args.index) : getContext().chat.length - 1;
+    await summarizeMessage(index);
+    return 'Summarization complete';
+  }, [], '– summarize a message');
 }
 
 /**
@@ -187,9 +313,8 @@ async function handleMessageReceived(data) {
 async function handleMessageSent(data) {
   if (!settings.enabled || !settings.autoSummarize) return;
   
-  if (settings.summarizeTiming === 'before_generation') {
-    // Will be triggered by GENERATION_AFTER_COMMANDS event
-    return;
+  if (settings.summarizeTiming === 'after_generation') {
+    await triggerAutoSummarization();
   }
 }
 
@@ -216,43 +341,36 @@ async function triggerAutoSummarization() {
   
   if (!chat || chat.length === 0) return;
   
-  // Determine which messages need summarization
+  // Find messages that need summarization
   const messagesToSummarize = [];
-  const startIndex = Math.max(0, chat.length - settings.messageLimit || chat.length);
   
-  for (let i = startIndex; i < chat.length - settings.messageLag; i++) {
+  for (let i = 0; i < chat.length - settings.messageLag; i++) {
     const msg = chat[i];
     
-    // Check if message should be summarized
-    if (shouldSummarizeMessage(msg) && !hasMemory(msg)) {
+    if (shouldSummarizeMessage(msg, i) && !memoryCache.has(i)) {
       messagesToSummarize.push(i);
     }
   }
   
   if (messagesToSummarize.length === 0) {
-    if (settings.debugMode) {
-      console.log(`[${extensionName}] No messages to summarize`);
-    }
     return;
   }
   
-  // Batch process messages
+  console.log(`[${extensionName}] Summarizing ${messagesToSummarize.length} messages`);
   await processSummarizationQueue(messagesToSummarize);
 }
 
 /**
  * Check if message should be summarized
  */
-function shouldSummarizeMessage(message) {
+function shouldSummarizeMessage(message, index) {
   if (!message || !message.mes) return false;
   
   // Check message type filters
   if (message.is_user && !settings.includeUserMessages) return false;
   if (!message.is_user && !settings.includeCharacterMessages) return false;
-  if (message.is_system && !settings.includeSystemMessages) return false;
-  if (message.hidden && !settings.includeHiddenMessages) return false;
   
-  // Check message length threshold
+  // Check message length
   const tokenCount = estimateTokens(message.mes);
   if (tokenCount < settings.messageThreshold) return false;
   
@@ -260,10 +378,11 @@ function shouldSummarizeMessage(message) {
 }
 
 /**
- * Process summarization queue with batching
+ * Process summarization queue
  */
 async function processSummarizationQueue(messageIndices) {
   isProcessing = true;
+  shouldStopProcessing = false;
   showProgress(0, messageIndices.length);
   
   try {
@@ -271,28 +390,28 @@ async function processSummarizationQueue(messageIndices) {
       ? calculateOptimalBatchSize(messageIndices.length)
       : settings.batchSize;
     
-    for (let i = 0; i < messageIndices.length; i += batchSize) {
-      const batch = messageIndices.slice(i, i + batchSize);
+    for (let i = 0; i < messageIndices.length; i++) {
+      if (shouldStopProcessing) {
+        console.log(`[${extensionName}] Stopped by user`);
+        break;
+      }
       
-      // Process batch in parallel
-      await Promise.all(batch.map(index => summarizeMessage(index)));
+      await summarizeMessage(messageIndices[i]);
+      showProgress(i + 1, messageIndices.length);
       
-      // Update progress
-      showProgress(Math.min(i + batchSize, messageIndices.length), messageIndices.length);
-      
-      // Delay between batches to respect rate limits
-      if (i + batchSize < messageIndices.length && settings.delayBetweenSummaries > 0) {
+      if (settings.delayBetweenSummaries > 0 && i < messageIndices.length - 1) {
         await sleep(settings.delayBetweenSummaries);
       }
     }
     
-    // Update display after all summaries complete
     updateMemoryDisplay();
     await saveMemories();
     
     console.log(`[${extensionName}] Summarized ${messageIndices.length} messages`);
+    toastr.success(`Summarized ${messageIndices.length} messages`);
+    
   } catch (error) {
-    console.error(`[${extensionName}] Error in summarization queue:`, error);
+    console.error(`[${extensionName}] Error in summarization:`, error);
     toastr.error(`Summarization failed: ${error.message}`);
   } finally {
     isProcessing = false;
@@ -313,256 +432,226 @@ async function summarizeMessage(messageIndex) {
   }
   
   try {
-    // Check if incremental update is possible
-    const existingMemory = getMemory(messageIndex);
+    // Check if incremental update possible
+    const existingMemory = memoryCache.get(messageIndex);
     if (existingMemory && settings.incrementalUpdates) {
-      // Only update if message changed significantly
-      if (!hasMessageChanged(message, existingMemory)) {
-        if (settings.debugMode) {
-          console.log(`[${extensionName}] Message ${messageIndex} unchanged, skipping`);
-        }
+      if (message.mes === existingMemory.originalText) {
+        console.log(`[${extensionName}] Message ${messageIndex} unchanged, skipping`);
         return;
       }
     }
     
-    // Prepare summary prompt
-    const prompt = prepareSummaryPrompt(message);
+    // Prepare prompt
+    let prompt = settings.summaryPrompt;
+    prompt = prompt.replace(/\{\{message\}\}/g, message.mes);
+    prompt = prompt.replace(/\{\{char\}\}/g, message.name || 'Character');
+    prompt = prompt.replace(/\{\{user\}\}/g, power_user.name || 'User');
     
-    // Generate summary using ST's native API
-    const summary = await generateSummary(prompt);
+    // Generate summary - FIX: Use proper ST API
+    console.log(`[${extensionName}] Generating summary for message ${messageIndex}`);
+    
+    const summary = await generateSummarySimple(prompt);
     
     // Store memory
-    setMemory(messageIndex, {
+    memoryCache.set(messageIndex, {
       summary: summary,
       originalText: message.mes,
       timestamp: Date.now(),
-      messageId: message.id || messageIndex,
+      messageId: messageIndex,
       isLongTerm: false,
       manuallyExcluded: false
     });
     
-    if (settings.debugMode) {
-      console.log(`[${extensionName}] Summarized message ${messageIndex}:`, summary);
-    }
+    console.log(`[${extensionName}] Summarized message ${messageIndex}`);
     
   } catch (error) {
     console.error(`[${extensionName}] Error summarizing message ${messageIndex}:`, error);
-    toastr.error(`Failed to summarize message ${messageIndex}`);
+    toastr.error(`Failed to summarize message ${messageIndex}: ${error.message}`);
   }
 }
 
 /**
- * Generate summary using ST's API
+ * Generate summary - SIMPLIFIED VERSION
  */
-async function generateSummary(prompt) {
-  const context = getContext();
-  
-  // Save current settings if using separate preset
-  let originalPreset = null;
-  let originalTemp = null;
-  
-  if (settings.useSeparatePreset && settings.presetName) {
-    // Switch to summary preset
-    // Note: This requires careful handling to avoid losing user's current settings
-    console.log(`[${extensionName}] Using separate preset: ${settings.presetName}`);
-  }
-  
+async function generateSummarySimple(prompt) {
   try {
-    // Use quiet prompt generation (doesn't add to chat)
-    const response = await context.generateQuietPrompt(
-      prompt,
-      false, // quiet
-      false, // skip WI
-      ''     // quiet image
-    );
+    const context = getContext();
     
-    if (!response || response.trim().length === 0) {
-      throw new Error('Empty response from LLM');
+    // Try using generateQuietPrompt if available
+    if (typeof context.generateQuietPrompt === 'function') {
+      const response = await context.generateQuietPrompt(prompt, false, false, '');
+      if (response && response.trim()) {
+        return cleanSummary(response);
+      }
     }
     
-    // Clean up response
-    let summary = response.trim();
-    
-    // Remove common prefixes
-    summary = summary.replace(/^(Summary:|The summary is:|Here is the summary:)\s*/i, '');
-    
-    // Trim to max tokens if needed
-    summary = truncateToTokens(summary, settings.summaryMaxTokens);
-    
-    return summary;
-    
-  } finally {
-    // Restore original settings if changed
-    if (originalPreset) {
-      // Restore preset
+    // Fallback: Try using generate if available
+    if (typeof context.generate === 'function') {
+      const response = await context.generate(prompt);
+      if (response && response.trim()) {
+        return cleanSummary(response);
+      }
     }
+    
+    // If neither works, return a placeholder
+    console.warn(`[${extensionName}] No generation method available, using placeholder`);
+    return '[Summary generation not available - please configure your API]';
+    
+  } catch (error) {
+    console.error(`[${extensionName}] Generation error:`, error);
+    throw new Error(`Summary generation failed: ${error.message}`);
   }
 }
 
 /**
- * Prepare summary prompt with macro replacements
+ * Clean up summary text
  */
-function prepareSummaryPrompt(message) {
-  let prompt = settings.summaryPrompt;
-  
-  // Replace standard macros
-  prompt = prompt.replace(/\{\{message\}\}/g, message.mes);
-  prompt = prompt.replace(/\{\{char\}\}/g, message.name || 'Character');
-  prompt = prompt.replace(/\{\{user\}\}/g, power_user.name || 'User');
-  
-  // Custom macros could be added here
-  
-  return prompt;
+function cleanSummary(text) {
+  let summary = text.trim();
+  summary = summary.replace(/^(Summary:|The summary is:|Here is the summary:)\s*/i, '');
+  summary = truncateToTokens(summary, settings.summaryMaxTokens);
+  return summary;
 }
 
 /**
- * Setup context injection
+ * Update memory display
  */
-function setupContextInjection() {
-  const context = getContext();
+function updateMemoryDisplay() {
+  if (!settings.displayMemories) {
+    $('.message-memory').remove();
+    return;
+  }
   
-  // Register injection handler
-  // This integrates with ST's prompt building system
-  context.registerHelper('getMemoryInjection', () => {
-    if (!settings.enabled) return '';
-    
-    return buildMemoryInjection();
+  $('.message-memory').remove();
+  
+  $('#chat .mes').each(function(index) {
+    const memory = memoryCache.get(index);
+    if (memory) {
+      const memoryDiv = $(`
+        <div class="message-memory" style="
+          font-size: 0.85em;
+          margin-top: 8px;
+          padding: 8px;
+          border-left: 3px solid ${settings.colorShortTerm};
+          background: rgba(0,0,0,0.1);
+          font-style: italic;
+        ">
+          💭 ${escapeHtml(memory.summary)}
+        </div>
+      `);
+      $(this).find('.mes_text').after(memoryDiv);
+    }
   });
 }
 
 /**
- * Build memory injection text
+ * Show progress
  */
-function buildMemoryInjection() {
-  const shortTermMemories = getShortTermMemories();
-  const longTermMemories = getLongTermMemories();
+function showProgress(current, total) {
+  let progressDiv = $('#memory-progress');
   
-  let injection = '';
-  
-  // Add long-term memories
-  if (longTermMemories.length > 0 && !isInjectionDisabled('long-term')) {
-    injection += '[Long-term Memory]\n';
-    injection += longTermMemories.map(m => m.summary).join('\n');
-    injection += '\n\n';
+  if (progressDiv.length === 0) {
+    progressDiv = $(`
+      <div id="memory-progress" style="
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        background: var(--SmartThemeBodyColor);
+        border: 2px solid var(--SmartThemeBorderColor);
+        padding: 15px;
+        border-radius: 8px;
+        z-index: 9999;
+        min-width: 250px;
+      ">
+        <div style="font-weight: bold; margin-bottom: 8px;">
+          <i class="fa-solid fa-spinner fa-spin"></i> Summarizing Messages
+        </div>
+        <div class="progress-bar" style="
+          width: 100%;
+          height: 8px;
+          background: #ddd;
+          border-radius: 4px;
+          overflow: hidden;
+        ">
+          <div class="progress-fill" style="
+            height: 100%;
+            background: #22c55e;
+            width: 0%;
+            transition: width 0.3s;
+          "></div>
+        </div>
+        <div class="progress-text" style="margin-top: 8px; font-size: 0.9em;">0 / 0</div>
+        <button id="memory-stop-btn" class="menu_button" style="margin-top: 8px; width: 100%;">
+          <i class="fa-solid fa-stop"></i> Stop
+        </button>
+      </div>
+    `);
+    $('body').append(progressDiv);
+    
+    $('#memory-stop-btn').on('click', () => {
+      shouldStopProcessing = true;
+      toastr.info('Stopping summarization...');
+    });
   }
   
-  // Add short-term memories
-  if (shortTermMemories.length > 0 && !isInjectionDisabled('short-term')) {
-    injection += '[Recent Events]\n';
-    injection += shortTermMemories.map(m => m.summary).join('\n');
-    injection += '\n\n';
-  }
-  
-  return injection;
+  const percentage = total > 0 ? (current / total) * 100 : 0;
+  progressDiv.find('.progress-fill').css('width', `${percentage}%`);
+  progressDiv.find('.progress-text').text(`${current} / ${total}`);
 }
 
 /**
- * Get short-term memories within token limit
+ * Hide progress
  */
-function getShortTermMemories() {
-  const context = getContext();
-  const chat = context.chat;
-  const memories = [];
-  let tokenCount = 0;
-  
-  // Iterate backwards from most recent
-  for (let i = chat.length - 1; i >= 0; i--) {
-    const memory = getMemory(i);
-    
-    if (!memory || memory.manuallyExcluded || memory.isLongTerm) continue;
-    
-    const memoryTokens = estimateTokens(memory.summary);
-    
-    if (tokenCount + memoryTokens > settings.shortTermLimit) {
-      break;
-    }
-    
-    memories.unshift(memory);
-    tokenCount += memoryTokens;
-  }
-  
-  return memories;
-}
-
-/**
- * Get long-term memories within token limit
- */
-function getLongTermMemories() {
-  const memories = [];
-  let tokenCount = 0;
-  
-  // Get all long-term marked memories
-  const longTermMemories = Array.from(memoryCache.values())
-    .filter(m => m.isLongTerm && !m.manuallyExcluded)
-    .sort((a, b) => a.messageId - b.messageId);
-  
-  for (const memory of longTermMemories) {
-    const memoryTokens = estimateTokens(memory.summary);
-    
-    if (tokenCount + memoryTokens > settings.longTermLimit) {
-      break;
-    }
-    
-    memories.push(memory);
-    tokenCount += memoryTokens;
-  }
-  
-  return memories;
-}
-
-/**
- * Memory management functions
- */
-function getMemory(messageIndex) {
-  return memoryCache.get(messageIndex);
-}
-
-function setMemory(messageIndex, memoryData) {
-  memoryCache.set(messageIndex, memoryData);
-}
-
-function hasMemory(message) {
-  const index = getContext().chat.indexOf(message);
-  return memoryCache.has(index);
-}
-
-function toggleLongTermMemory(messageIndex) {
-  const memory = getMemory(messageIndex);
-  if (memory) {
-    memory.isLongTerm = !memory.isLongTerm;
-    updateMemoryDisplay();
-    saveMemories();
-  }
+function hideProgress() {
+  $('#memory-progress').remove();
 }
 
 /**
  * Save memories to chat metadata
  */
 async function saveMemories() {
-  const context = getContext();
-  
-  const memoriesData = Array.from(memoryCache.entries()).map(([index, memory]) => ({
-    index,
-    ...memory
-  }));
-  
-  await context.saveMetadata({ memories: memoriesData });
+  try {
+    const context = getContext();
+    const memoriesArray = Array.from(memoryCache.entries()).map(([index, memory]) => ({
+      index,
+      ...memory
+    }));
+    
+    // Try to save to chat metadata
+    if (context.saveMetadata) {
+      await context.saveMetadata({ memories: memoriesArray });
+    } else {
+      console.warn(`[${extensionName}] saveMetadata not available`);
+    }
+    
+  } catch (error) {
+    console.error(`[${extensionName}] Error saving memories:`, error);
+  }
 }
 
 /**
  * Load memories from chat metadata
  */
 async function loadMemories() {
-  const context = getContext();
-  const metadata = await context.getMetadata();
-  
-  memoryCache.clear();
-  
-  if (metadata?.memories) {
-    for (const memoryData of metadata.memories) {
-      const { index, ...memory } = memoryData;
-      memoryCache.set(index, memory);
+  try {
+    const context = getContext();
+    
+    memoryCache.clear();
+    
+    if (context.getMetadata) {
+      const metadata = await context.getMetadata();
+      
+      if (metadata && metadata.memories) {
+        for (const memoryData of metadata.memories) {
+          const { index, ...memory } = memoryData;
+          memoryCache.set(index, memory);
+        }
+        console.log(`[${extensionName}] Loaded ${memoryCache.size} memories`);
+      }
     }
+    
+  } catch (error) {
+    console.error(`[${extensionName}] Error loading memories:`, error);
   }
 }
 
@@ -570,8 +659,6 @@ async function loadMemories() {
  * Utility functions
  */
 function estimateTokens(text) {
-  // Simple estimation: ~4 characters per token
-  // ST has better tokenizers available through context
   return Math.ceil(text.length / 4);
 }
 
@@ -588,23 +675,29 @@ function sleep(ms) {
 }
 
 function calculateOptimalBatchSize(totalMessages) {
-  // Smart batching based on total count
   if (totalMessages < 10) return 3;
   if (totalMessages < 50) return 5;
   if (totalMessages < 100) return 10;
   return 15;
 }
 
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
 // Export public API
 window.MemorySummarize = {
   summarizeMessage,
-  getMemory,
-  toggleLongTermMemory,
+  getMemory: (index) => memoryCache.get(index),
   getSummaries: () => Array.from(memoryCache.values()),
-  getSettings: () => settings
+  getSettings: () => settings,
+  stopProcessing: () => { shouldStopProcessing = true; }
 };
 
-// Initialize when DOM is ready
+// Initialize when jQuery is ready
 jQuery(() => {
+  console.log(`[${extensionName}] jQuery ready, initializing...`);
   init();
 });

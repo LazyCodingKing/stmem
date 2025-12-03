@@ -1,6 +1,5 @@
 // ============================================================================
-// IMPORTS
-// (We removed eventSource/event_types from here to avoid the crash)
+// IMPORTS: 3 Levels Up (Correct for your install)
 // ============================================================================
 import {
     saveSettingsDebounced,
@@ -14,62 +13,53 @@ import {
 } from '../../../extensions.js';
 
 // ============================================================================
-// SETUP: Get Events from Global Context (The Safe Way)
+// SETUP: Get Context & Tools
 // ============================================================================
 const context = SillyTavern.getContext();
 const eventSource = context.eventSource;
 const event_types = context.event_types;
-const getContext = () => context; // Helper to match old code
+// We grab the template loader from context to load settings.html safely
+const renderExtensionTemplateAsync = context.renderExtensionTemplateAsync; 
 
 // ============================================================================
 // CONSTANTS & CONFIG
 // ============================================================================
 
 const extensionName = 'memory-summarize';
+const extensionPath = 'third-party/memory-summarize'; // Based on your log
 const MAX_SUMMARY_WORDS = 350;
 
 // Default settings
 const defaultSettings = {
-    enabled: true,
-    autoSummarize: true,
-    messageThreshold: 20,
+    enabled: true,           // Maps to #auto_summarize
+    messageThreshold: 20,    // Maps to #summarization_delay
     master_summary: "",
     debugMode: true
 };
 
 // ============================================================================
-// HELPER: THE SMART PEELER (HTML/Stats Cleaner)
+// HELPER: HTML CLEANER
 // ============================================================================
 function cleanTextForSummary(text) {
     if (!text) return "";
-
-    // 1. KILL LIST: Remove UI Stats / Info Boxes
     text = text.replace(/User's Stats[\s\S]*?(?=\n\n|$)/g, "");
     text = text.replace(/Info Box[\s\S]*?(?=\n\n|$)/g, "");
     text = text.replace(/Present Characters[\s\S]*?(?=\n\n|$)/g, "");
-
-    // 2. UNWRAP HTML: Handle "Bulletin Boards"
     text = text.replace(/```\w*\n?/g, "").replace(/```/g, "");
-
-    // 3. STRIP TAGS: Remove <div...>, <br>, </span> but keep text
     text = text.replace(/<[^>]*>/g, " ");
-
-    // 4. CLEANUP: Squash extra spaces
     text = text.replace(/\s+/g, " ").trim();
-
     return text;
 }
 
 // ============================================================================
-// CORE LOGIC: ROLLING SUMMARIZATION
+// CORE LOGIC: ROLLING SUMMARY
 // ============================================================================
-
 async function triggerRollingSummarize() {
     const chat = context.chat;
     const threshold = extension_settings[extensionName].messageThreshold || 20;
 
-    // Safety check
-    if (!chat || chat.length === 0) return;
+    // Safety: Need enough messages
+    if (!chat || chat.length < threshold) return;
 
     // Only grab the recent messages
     const recentMessages = chat.slice(-threshold);
@@ -78,7 +68,7 @@ async function triggerRollingSummarize() {
         return `${msg.name}: ${cleanTextForSummary(msg.mes)}`;
     }).join('\n');
 
-    if (newEventsText.length < 50) return; // Too short
+    if (newEventsText.length < 50) return;
 
     let currentMemory = extension_settings[extensionName].master_summary || "No prior history.";
 
@@ -112,6 +102,9 @@ async function triggerRollingSummarize() {
             saveSettingsDebounced();
             console.log(`[${extensionName}] Memory Updated!`);
             toastr.success("Memory Updated", "Rolling Summary");
+            
+            // Update UI if open (Optional)
+            $('#qvink_memory_display').text(newSummary.trim());
         }
     } catch (e) {
         console.error(`[${extensionName}] Summarization Failed:`, e);
@@ -119,7 +112,7 @@ async function triggerRollingSummarize() {
 }
 
 // ============================================================================
-// INTERCEPTOR: INJECT MEMORY INTO PROMPT
+// INTERCEPTOR
 // ============================================================================
 function memory_intercept_messages(chat, ...args) {
     if (!extension_settings[extensionName]?.enabled) return;
@@ -138,18 +131,56 @@ function memory_intercept_messages(chat, ...args) {
 }
 
 // ============================================================================
+// UI BINDING (Connects HTML inputs to Settings)
+// ============================================================================
+function bindSettingsUI() {
+    // 1. Connect "Auto Summarize" Checkbox
+    const $enableBox = $('#auto_summarize');
+    $enableBox.prop('checked', extension_settings[extensionName].enabled);
+    $enableBox.on('change', () => {
+        extension_settings[extensionName].enabled = $enableBox.prop('checked');
+        saveSettingsDebounced();
+    });
+
+    // 2. Connect "Message Lag" (Threshold) Input
+    const $thresholdInput = $('#summarization_delay'); // Reusing this input ID from your HTML
+    $thresholdInput.val(extension_settings[extensionName].messageThreshold);
+    $thresholdInput.on('change', () => {
+        const val = parseInt($thresholdInput.val());
+        if (!isNaN(val) && val > 0) {
+            extension_settings[extensionName].messageThreshold = val;
+            saveSettingsDebounced();
+        }
+    });
+}
+
+// ============================================================================
 // INITIALIZATION
 // ============================================================================
-
 jQuery(async function () {
     console.log(`[${extensionName}] Initializing...`);
 
+    // 1. Load Settings
     const settings = await loadExtensionSettings(extensionName);
     if (!extension_settings[extensionName]) {
         extension_settings[extensionName] = {};
     }
     Object.assign(extension_settings[extensionName], defaultSettings, settings);
 
+    // 2. INJECT HTML UI (This is what we missed!)
+    try {
+        // We use the path from your log: third-party/memory-summarize
+        const settingsHtml = await renderExtensionTemplateAsync(extensionPath, 'settings');
+        $('#extensions_settings').append(settingsHtml);
+        
+        // Bind the inputs so they actually work
+        bindSettingsUI();
+        
+    } catch (e) {
+        console.error(`[${extensionName}] Failed to load settings.html:`, e);
+    }
+
+    // 3. Register Listeners
     if (eventSource) {
         eventSource.on(event_types.MESSAGE_RECEIVED, async () => {
             const currentContext = SillyTavern.getContext();
@@ -162,8 +193,8 @@ jQuery(async function () {
         });
     }
 
-    // Expose for manifest
+    // 4. Expose for manifest
     window.memory_intercept_messages = memory_intercept_messages;
 
-    console.log(`[${extensionName}] Ready. 🚀`);
+    console.log(`[${extensionName}] Ready with UI. 🚀`);
 });

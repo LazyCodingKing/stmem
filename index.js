@@ -6,7 +6,7 @@
 
 // Extension metadata
 const extensionName = 'memory-summarize';
-const extensionFolderPath = `third-party/memory-summarize`;
+const extensionFolderPath = `scripts/extensions/third-party/memory-summarize`;
 
 // Default settings
 const defaultSettings = {
@@ -77,14 +77,26 @@ async function init() {
 
         const { eventSource, event_types, saveSettingsDebounced, extension_settings } = context;
 
-        // More robust check - wait if extension_settings doesn't exist yet OR is an empty object
-        if (!extension_settings) {
-            console.log(`[${extensionName}] extension_settings is null/undefined. Waiting for EXTENSION_SETTINGS_LOADED...`);
-            eventSource.once(event_types.EXTENSION_SETTINGS_LOADED, () => {
-                console.log(`[${extensionName}] EXTENSION_SETTINGS_LOADED event received, retrying init...`);
-                init();
-            });
-            return;
+        // Check if extension_settings exists and has been populated
+        // The key check: extension_settings exists as an object but might be empty initially
+        if (!extension_settings || Object.keys(extension_settings).length === 0) {
+            console.log(`[${extensionName}] extension_settings not ready (${extension_settings ? 'empty' : 'null'}). Waiting for EXTENSION_SETTINGS_LOADED...`);
+            
+            // Check if the event already fired by looking for other extension settings
+            // If other extensions have settings, the event already fired
+            const settingsAlreadyLoaded = extension_settings && Object.keys(extension_settings).length > 0;
+            
+            if (settingsAlreadyLoaded) {
+                console.log(`[${extensionName}] Settings were already loaded, initializing now...`);
+                // Continue with initialization
+            } else {
+                // Wait for the event
+                eventSource.once(event_types.EXTENSION_SETTINGS_LOADED, () => {
+                    console.log(`[${extensionName}] EXTENSION_SETTINGS_LOADED event received, retrying init...`);
+                    init();
+                });
+                return;
+            }
         }
 
         // Make context available globally for this extension
@@ -361,12 +373,8 @@ window.memorySummarize = {
     toggleConfigPopup
 };
 
-// Initialize when the script loads
+// Initialize immediately - no setTimeout needed
 (function() {
-    console.log(`[${extensionName}] Extension script loaded, scheduling initialization...`);
-    
-    // Use setTimeout to ensure SillyTavern is fully ready
-    setTimeout(() => {
-        init();
-    }, 100);
+    console.log(`[${extensionName}] Extension script loaded, initializing...`);
+    init();
 })();

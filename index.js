@@ -4,13 +4,9 @@
  * Author: LazyCodingKing / Qvink
  */
 
-// Get SillyTavern context API
-// NOTE: We do NOT destructure extension_settings here to avoid "undefined" errors on startup
-const { eventSource, event_types, saveSettingsDebounced } = SillyTavern.getContext();
-
 // Extension metadata
 const extensionName = 'memory-summarize';
-const extensionFolderPath = `scripts/extensions/third-party/memory-summarize`;
+const extensionFolderPath = `third-party/memory-summarize`;
 
 // Default settings
 const defaultSettings = {
@@ -55,27 +51,35 @@ const defaultSettings = {
 // Extension state
 let settings = { ...defaultSettings };
 let memoryCache = new Map();
+let isInitialized = false;
 
 /**
  * Initialize extension
  */
 async function init() {
+    // Prevent double initialization
+    if (isInitialized) {
+        console.log(`[${extensionName}] Already initialized, skipping...`);
+        return;
+    }
+
     console.log(`[${extensionName}] Starting initialization...`);
 
-    // --- FIX START: RACE CONDITION CHECK ---
-    // We fetch the context freshly here to ensure we get the latest objects
-    const context = SillyTavern.getContext();
-    const extension_settings = context.extension_settings;
-
-    // Safety Check: If settings aren't loaded yet, wait for the event
-    if (typeof extension_settings === 'undefined') {
-        console.log(`[${extensionName}] Settings not ready yet. Waiting for extension_settings_loaded event...`);
-        eventSource.once('extension_settings_loaded', init);
-        return; 
-    }
-    // --- FIX END ---
-
     try {
+        // Get SillyTavern context - DO THIS INSIDE THE TRY BLOCK
+        const context = SillyTavern.getContext();
+        const { eventSource, event_types, saveSettingsDebounced, extension_settings } = context;
+
+        // Safety Check: If settings aren't loaded yet, wait for the event
+        if (!extension_settings || typeof extension_settings === 'undefined') {
+            console.log(`[${extensionName}] Settings not ready yet. Waiting for extension_settings_loaded event...`);
+            eventSource.once(event_types.EXTENSION_SETTINGS_LOADED, init);
+            return; 
+        }
+
+        // Make context available globally for this extension
+        window.memorySummarizeContext = { eventSource, event_types, saveSettingsDebounced, extension_settings };
+
         // Initialize settings
         if (!extension_settings[extensionName]) {
             console.log(`[${extensionName}] Creating default settings...`);
@@ -85,7 +89,7 @@ async function init() {
         // Link our local 'settings' variable to the global object
         settings = extension_settings[extensionName];
 
-        console.log(`[${extensionName}] Settings loaded`);
+        console.log(`[${extensionName}] Settings loaded:`, settings);
 
         // Apply CSS variables
         applyCSSVariables();
@@ -102,9 +106,11 @@ async function init() {
         // Trigger an initial memory display update
         updateMemoryDisplay();
 
+        isInitialized = true;
         console.log(`[${extensionName}] ✅ Initialization complete`);
     } catch (err) {
         console.error(`[${extensionName}] Fatal initialization error:`, err);
+        console.error(`[${extensionName}] Stack trace:`, err.stack);
     }
 }
 
@@ -117,15 +123,15 @@ async function setupUI() {
 
         // Add extension button to top bar (Standard SillyTavern Extensions Menu)
         const buttonHtml = `
-            <div id="memory-summarize-button" class="list-group-item flex-container flex-gap-10" title="Memory Summarize v2.0">
-                <i class="fa-solid fa-brain"></i> 
+            <div id="memory-summarize-button" class="list-group-item flex-container flexGap5" title="Memory Summarize v2.0">
+                <div class="fa-solid fa-brain extensionsMenuExtensionButton"></div> 
                 <span data-i18n="Memory Summarize">Memory Summarize</span>
             </div>`;
         
         const button = $(buttonHtml);
         button.on('click', () => toggleConfigPopup());
         
-        // Append to the extension menu container (FIXED: extensions_settings2)
+        // Append to the extension menu container
         $('#extensions_settings2').append(button);
 
         // Load config HTML
@@ -172,6 +178,7 @@ async function setupUI() {
  * Register event listeners
  */
 function registerEventListeners() {
+    const { eventSource, event_types } = window.memorySummarizeContext;
     if (!eventSource || !event_types) return;
 
     eventSource.on(event_types.MESSAGE_RECEIVED, (data) => {
@@ -191,8 +198,9 @@ function registerEventListeners() {
 function registerSlashCommands() {
     if (window.SlashCommandParser) {
         window.SlashCommandParser.addCommand('memsum', async (args) => {
+            console.log(`[${extensionName}] Manual summarization triggered`);
             return 'Memory summarization triggered (Logic Pending)';
-        }, [], 'Manually trigger memory summarization');
+        }, [], '<span class="monospace">/memsum</span> – Manually trigger memory summarization', true, true);
     }
 }
 
@@ -243,6 +251,7 @@ function bindSettingsToUI() {
 
     // Save Button
     $('#memory-save-btn').off('click').on('click', () => {
+        const { saveSettingsDebounced } = window.memorySummarizeContext;
         saveSettingsDebounced();
         if (typeof toastr !== 'undefined') toastr.success('Settings saved!');
         $('#memory-config-popup').removeClass('visible');
@@ -259,6 +268,7 @@ function bindCheckbox(selector, settingKey, callback) {
     el.prop('checked', settings[settingKey]);
     el.off('change').on('change', function() {
         settings[settingKey] = $(this).prop('checked');
+        const { saveSettingsDebounced } = window.memorySummarizeContext;
         saveSettingsDebounced();
         if (callback) callback();
     });
@@ -276,6 +286,7 @@ function bindInput(selector, settingKey, isNumber = false, callback) {
         let val = $(this).val();
         if (isNumber) val = parseInt(val) || 0;
         settings[settingKey] = val;
+        const { saveSettingsDebounced } = window.memorySummarizeContext;
         saveSettingsDebounced();
         if (callback) callback();
     });
@@ -295,12 +306,19 @@ function updateMemoryDisplay() {
         $('.message-memory').remove();
         return;
     }
+    console.log(`[${extensionName}] Updating memory display...`);
 }
 
 function createDefaultConfigHTML() {
-    return `<div style="padding:20px; color:white;">
-        <h3>Configuration</h3>
-        <p>Config file not found. Ensure <b>config.html</b> is in the extension folder.</p>
+    return `<div style="padding:20px; color:white; background: #1a1a1a; border-radius: 8px;">
+        <h3 style="margin-top:0;">⚠️ Configuration UI Not Found</h3>
+        <p>The config.html file could not be loaded.</p>
+        <p>Please ensure <code>config.html</code> exists in:<br>
+        <code>${extensionFolderPath}/config.html</code></p>
+        <hr>
+        <h4>Extension Status: Active</h4>
+        <p>The extension is loaded but settings UI is unavailable.</p>
+        <button id="memory-close-btn" style="padding:8px 16px; margin-top:10px; background:#3b82f6; color:white; border:none; border-radius:4px; cursor:pointer;">Close</button>
     </div>`;
 }
 
@@ -312,7 +330,10 @@ window.memorySummarize = {
     toggleConfigPopup
 };
 
-// Initialize when the script loads (FIXED: No jQuery ready wrapper)
+// Initialize when the script loads
 (async function() {
+    console.log(`[${extensionName}] Extension script loaded, scheduling initialization...`);
+    
+    // Try to initialize immediately
     await init();
 })();

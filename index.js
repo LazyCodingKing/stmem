@@ -5,18 +5,17 @@ import {
     renderExtensionTemplateAsync 
 } from '../../../../script.js';
 
-import { extension_settings } from '../../../extensions.js';
+// REMOVED: import { extension_settings } ... 
+// We will access settings globally to avoid the "null" loop.
 
 /**
  * Memory Summarize v2.0
- * Architecture: ES6 Imports + SillyTavern Template Loader (NoAss Style)
+ * Fixed: Uses global context to avoid import race conditions
  */
 
-// Extension metadata
 const extensionName = 'memory-summarize';
 const extensionFolderPath = `third-party/memory-summarize`;
 
-// Default settings
 const defaultSettings = {
     enabled: true,
     autoSummarize: true,
@@ -56,33 +55,41 @@ const defaultSettings = {
     activeProfile: 'default'
 };
 
-// Extension state
 let settings = { ...defaultSettings };
-let memoryCache = new Map();
 
 /**
- * Load and Validate Settings
+ * Load Settings Safe Method
  */
 function loadSettings() {
-    // If settings don't exist, create defaults
-    if (!extension_settings[extensionName]) {
+    // 1. GET SETTINGS FROM GLOBAL CONTEXT (The Fix)
+    const context = SillyTavern.getContext();
+    const globalSettings = context.extension_settings;
+
+    if (!globalSettings) {
+        console.warn(`[${extensionName}] Extension settings not available yet.`);
+        return false;
+    }
+
+    // 2. Initialize defaults if missing
+    if (!globalSettings[extensionName]) {
         console.log(`[${extensionName}] Creating default settings...`);
-        extension_settings[extensionName] = { ...defaultSettings };
+        globalSettings[extensionName] = { ...defaultSettings };
         saveSettingsDebounced();
     }
 
-    // Link local variable to global settings
-    settings = extension_settings[extensionName];
+    // 3. Link local variable
+    settings = globalSettings[extensionName];
     console.log(`[${extensionName}] Settings loaded.`);
+    return true;
 }
 
 /**
- * Setup UI Elements (Using SillyTavern Template Loader)
+ * Setup UI
  */
 async function setupUI() {
     if ($('#memory-summarize-button').length > 0) return;
 
-    // 1. Add the Button to the Extensions Menu
+    // Add Button
     const buttonHtml = `
         <div id="memory-summarize-button" class="list-group-item flex-container flexGap5" title="Memory Summarize v2.0">
             <div class="fa-solid fa-brain extensionsMenuExtensionButton"></div> 
@@ -91,17 +98,16 @@ async function setupUI() {
     $('#extensions_settings').append(buttonHtml);
     $('#memory-summarize-button').on('click', () => toggleConfigPopup());
 
-    // 2. Load the Config Popup HTML using the "NoAss" method
-    // This looks for 'config.html' inside the extension folder automatically
+    // Load HTML Template
     let configHTML = "";
     try {
         configHTML = await renderExtensionTemplateAsync(extensionFolderPath, 'config');
     } catch (e) {
-        console.warn(`[${extensionName}] config.html not found, using fallback.`);
-        configHTML = `<div style="padding:20px;"><h3>Error</h3><p>Could not load config.html</p></div>`;
+        console.warn(`[${extensionName}] Template load failed:`, e);
+        configHTML = `<div style="padding:20px;"><h3>Error</h3><p>Could not load config.html. Ensure file exists.</p></div>`;
     }
 
-    // 3. Create the Popup Container
+    // Create Popup
     const popupHTML = `
         <div id="memory-config-popup" class="memory-config-popup">
              ${configHTML}
@@ -111,15 +117,12 @@ async function setupUI() {
         $('body').append(popupHTML);
     }
 
-    // 4. Bind Logic
     bindSettingsToUI();
     
-    // Close button handler
     $(document).on('click', '#memory-close-btn, #memory-cancel-btn', function() {
          $('#memory-config-popup').removeClass('visible');
     });
 
-    // Apply initial CSS
     applyCSSVariables();
 }
 
@@ -129,7 +132,6 @@ async function setupUI() {
 function setupListeners() {
     if (!eventSource) return;
 
-    // ST Events
     eventSource.on(event_types.MESSAGE_RECEIVED, (data) => {
         if (settings.enabled && settings.autoSummarize) {
             console.log(`[${extensionName}] Message received.`);
@@ -140,7 +142,6 @@ function setupListeners() {
         updateMemoryDisplay();
     });
 
-    // Slash Commands
     if (window.SlashCommandParser) {
         window.SlashCommandParser.addCommand('memsum', async (args) => {
             if (typeof toastr !== 'undefined') toastr.info('Memory summarization triggered');
@@ -149,9 +150,6 @@ function setupListeners() {
     }
 }
 
-/**
- * Toggle config popup visibility
- */
 function toggleConfigPopup() {
     const popup = $('#memory-config-popup');
     popup.toggleClass('visible');
@@ -218,23 +216,32 @@ function updateMemoryDisplay() {
 }
 
 // Global Export
-window.memorySummarize = { settings, memoryCache, toggleConfigPopup };
+window.memorySummarize = { settings, toggleConfigPopup };
 
 // ============================================================================
-// MAIN ENTRY POINT (NoAss Style)
+// MAIN INITIALIZATION
 // ============================================================================
 jQuery(async () => {
-    // 1. Load Settings first
-    loadSettings();
+    // Try loading settings
+    const loaded = loadSettings();
+    
+    if (!loaded) {
+        // If settings were not ready, we hook into the event and retry ONCE
+        // This prevents the infinite loop you were seeing
+        console.log(`[${extensionName}] Waiting for settings event...`);
+        eventSource.once('extension_settings_loaded', () => {
+            loadSettings();
+            setupUI();
+            setupListeners();
+            updateMemoryDisplay();
+            console.log(`[${extensionName}] Extension loaded (delayed)!`);
+        });
+        return;
+    }
 
-    // 2. Load UI (HTML templates)
+    // If settings were ready immediately, proceed
     await setupUI();
-
-    // 3. Register Listeners
     setupListeners();
-
-    // 4. Initial Logic
     updateMemoryDisplay();
-
     console.log(`[${extensionName}] Extension loaded!`);
 });

@@ -93,7 +93,6 @@ async function triggerAutoSummarize() {
 
     if (!chat || chat.length === 0) return;
 
-    // Logic: Determine target message based on lag
     const lag = parseInt(get_settings('messageLag')) || 0;
     const targetIndex = chat.length - 1 - lag;
 
@@ -106,20 +105,17 @@ async function triggerAutoSummarize() {
     if (!targetMsg.is_user && !targetMsg.is_system && !get_settings('includeCharacterMessages')) return;
     if (targetMsg.is_user && !get_settings('includeUserMessages')) return;
     
-    // Check if already summarized
     if (targetMsg.extensions?.[extensionName]?.summary) {
         log(`Message ${targetIndex} already has a summary.`);
         return;
     }
 
-    // Check Length
     const content = targetMsg.mes; 
     if (!content || content.length < get_settings('messageThreshold')) {
         log(`Message ${targetIndex} too short to summarize.`);
         return;
     }
 
-    // Execute
     await generateSummaryForMessage(targetIndex, content);
 }
 
@@ -130,8 +126,14 @@ async function generateSummaryForMessage(index, content) {
     const prompt = rawPrompt.replace('{{message}}', content);
 
     try {
-        // SillyTavern function to generate text in background
-        const result = await generateQuietPrompt(prompt, true, true); 
+        // ============================================================
+        // CRITICAL FIX: Use Object syntax for generateQuietPrompt
+        // ============================================================
+        const result = await generateQuietPrompt({
+            prompt: prompt,
+            quiet: true,
+            skipWIAN: true
+        }); 
         
         if (result) {
             log(`Summary generated: ${result}`);
@@ -147,9 +149,9 @@ async function generateSummaryForMessage(index, content) {
             context.saveChat();
             
             if (get_settings('displayMemories')) {
-                // In a real scenario, you might trigger a UI refresh here
-                // For now we just log it to ensure it works without breaking the chat render
                 log("Summary saved to chat.");
+                // Optional: If you want to force a visual update, you usually need to reload the chat HTML
+                // context.reloadChat(); // Uncommenting this might be jarring, usually best to let ST handle next render
             }
         }
     } catch (err) {
@@ -196,12 +198,10 @@ async function load_html() {
 }
 
 function bind_ui_listeners() {
-    // 1. Close / Toggle
     $(document).off('click', '#memory-close-btn, #memory-cancel-btn').on('click', '#memory-close-btn, #memory-cancel-btn', function() {
         $('#memory-config-popup').removeClass('visible').hide();
     });
 
-    // 2. Tab Switching
     $(document).off('click', '.memory-config-tab').on('click', '.memory-config-tab', function() {
         $('.memory-config-tab').removeClass('active');
         $(this).addClass('active');
@@ -211,14 +211,11 @@ function bind_ui_listeners() {
         $(`.memory-config-section[data-section="${targetSection}"]`).addClass('active');
     });
 
-    // 3. Inputs
     const checkboxes = ['enabled', 'autoSummarize', 'displayMemories', 'enableInNewChats', 'includeUserMessages', 'includeSystemMessages', 'removeMessagesAfterThreshold'];
     
     checkboxes.forEach(key => {
-        // Helper to handle both camelCase key and hyphenated-id
         const hyphen = key.replace(/[A-Z]/g, m => "-" + m.toLowerCase());
         const selector = `#memory-${hyphen}`;
-        
         bind_checkbox(selector, key);
     });
 
@@ -309,7 +306,6 @@ jQuery(async function () {
             log('Chat changed.');
         });
 
-        // Trigger on AI message
         eventSource.on(event_types.MESSAGE_RECEIVED, async (data) => {
             log('Message received. Checking auto-summarize...');
             if (get_settings('autoSummarize')) {
@@ -317,7 +313,6 @@ jQuery(async function () {
             }
         });
         
-        // Trigger on User message (if enabled)
         eventSource.on(event_types.MESSAGE_SENT, async () => {
              if (get_settings('autoSummarize') && get_settings('includeUserMessages')) {
                  setTimeout(() => triggerAutoSummarize(), 1000);

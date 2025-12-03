@@ -1,31 +1,33 @@
+// ============================================================================
+// IMPORTS (Fixed to use Absolute Paths)
+// ============================================================================
 import {
     saveSettingsDebounced,
-    generateRaw,
+    generateRaw, 
     eventSource,
     event_types,
     getRequestHeaders,
-} from '/scripts/script.js'; // FIXED: Absolute path
+} from '../../../../script.js';
 
-import {
-    extension_settings,
-    getContext,
-    loadExtensionSettings,
-} from '/scripts/extensions.js'; // FIXED: Absolute path
-
+import { 
+    extension_settings, 
+    getContext 
+} from '../../../extensions.js';
 // ============================================================================
 // CONSTANTS & CONFIG
 // ============================================================================
 
 const extensionName = 'memory-summarize';
 const summaryDivClass = 'qvink_memory_text';
-const MAX_SUMMARY_WORDS = 350; // TOKEN SAVER: Hard limit on summary size
+const MAX_SUMMARY_WORDS = 350; // TOKEN SAVER: Hard limit
 
-// Default settings (merged with user settings on load)
+// Default settings
 const defaultSettings = {
     enabled: true,
     autoSummarize: true,
     messageThreshold: 20, // Summarize every 20 messages
     master_summary: "",   // The "Rolling Memory" lives here
+    debugMode: true       // Enable logs so we can see what's happening
 };
 
 // ============================================================================
@@ -34,16 +36,15 @@ const defaultSettings = {
 function cleanTextForSummary(text) {
     if (!text) return "";
 
-    // 1. SPECIFIC KILL LIST: Remove UI Stats / Info Boxes completely
+    // 1. SPECIFIC KILL LIST: Remove UI Stats / Info Boxes
     text = text.replace(/User's Stats[\s\S]*?(?=\n\n|$)/g, "");
     text = text.replace(/Info Box[\s\S]*?(?=\n\n|$)/g, "");
     text = text.replace(/Present Characters[\s\S]*?(?=\n\n|$)/g, "");
 
-    // 2. UNWRAP HTML: Handle "Bulletin Boards" or generic code blocks
-    // Remove the ``` markers
+    // 2. UNWRAP HTML: Handle "Bulletin Boards"
     text = text.replace(/```\w*\n?/g, "").replace(/```/g, "");
 
-    // 3. STRIP TAGS: Remove <div...>, <br>, </span> but keep text
+    // 3. STRIP TAGS: Remove HTML tags but keep text
     text = text.replace(/<[^>]*>/g, " ");
 
     // 4. CLEANUP: Squash extra spaces
@@ -59,19 +60,17 @@ function cleanTextForSummary(text) {
 async function triggerRollingSummarize() {
     const context = getContext();
     const chat = context.chat;
-    
-    // Safety Check: Do we have enough messages?
-    // We only want to summarize the *new* messages since the last run.
-    // For simplicity in this "Rolling" version, we grab the last X messages.
     const threshold = extension_settings[extensionName].messageThreshold || 20;
+
+    // Only grab the recent messages
     const recentMessages = chat.slice(-threshold); 
 
-    // 1. Prepare the Text
+    // 1. Prepare the Text (Cleaned!)
     let newEventsText = recentMessages.map(msg => {
         return `${msg.name}: ${cleanTextForSummary(msg.mes)}`;
     }).join('\n');
 
-    if (newEventsText.length < 50) return; // Too short to summarize
+    if (newEventsText.length < 50) return; // Too short
 
     // 2. Get the Old Memory
     let currentMemory = extension_settings[extensionName].master_summary || "No prior history.";
@@ -89,7 +88,7 @@ async function triggerRollingSummarize() {
     [INSTRUCTIONS]:
     - Rewrite the summary to be a seamless narrative.
     - Merge new events into the history.
-    - Drop very old, irrelevant details if needed to save space.
+    - Drop very old, irrelevant details if needed.
     - KEEP THE TOTAL LENGTH UNDER ${MAX_SUMMARY_WORDS} WORDS.
     - Do not output any explanation, just the new summary text.
     `;
@@ -108,8 +107,6 @@ async function triggerRollingSummarize() {
             extension_settings[extensionName].master_summary = newSummary.trim();
             saveSettingsDebounced();
             console.log(`[${extensionName}] Memory Updated!`);
-            
-            // Visual Feedback (Optional: Toast or Log)
             toastr.success("Memory Updated", "Rolling Summary");
         }
     } catch (e) {
@@ -120,23 +117,19 @@ async function triggerRollingSummarize() {
 // ============================================================================
 // INTERCEPTOR: INJECT MEMORY INTO PROMPT
 // ============================================================================
-// This function must be registered in manifest.json as "generate_interceptor"
 function memory_intercept_messages(chat, ...args) {
-    if (!extension_settings[extensionName].enabled) return;
+    if (!extension_settings[extensionName]?.enabled) return;
 
     const memory = extension_settings[extensionName].master_summary;
     
     if (memory && memory.length > 5) {
-        // We inject the memory at the VERY TOP of the context (or depth 0)
-        // This acts like "Author's Note" or "World Info"
         const memoryBlock = {
             name: "System",
             is_system: true,
             mes: `[STORY SUMMARY SO FAR: ${memory}]`,
             force_avatar: "system.png"
         };
-        
-        // Insert at index 0 (Top of context)
+        // Insert at Top
         chat.unshift(memoryBlock);
     }
 }
@@ -146,28 +139,31 @@ function memory_intercept_messages(chat, ...args) {
 // ============================================================================
 
 jQuery(async function () {
+    console.log(`[${extensionName}] Initializing...`);
+
     // 1. Load Settings
     const settings = await loadExtensionSettings(extensionName);
-    // Merge defaults carefully
+    if (!extension_settings[extensionName]) {
+        extension_settings[extensionName] = {};
+    }
     Object.assign(extension_settings[extensionName], defaultSettings, settings);
 
-    // 2. Register Listeners (No more Timeout race conditions!)
+    // 2. Register Listeners
     if (eventSource) {
         eventSource.on(event_types.MESSAGE_RECEIVED, async () => {
-            // Check if we hit the threshold to trigger an update
             const context = getContext();
             const msgCount = context.chat.length;
             const threshold = extension_settings[extensionName].messageThreshold;
             
-            // Simple logic: If total messages is a multiple of threshold (e.g., 20, 40, 60)
-            if (msgCount % threshold === 0) {
+            // Check if we hit the threshold (e.g. 20, 40, 60)
+            if (msgCount > 0 && msgCount % threshold === 0) {
                 await triggerRollingSummarize();
             }
         });
     }
 
-    // 3. Expose function to global scope (for manifest interceptor)
+    // 3. Expose Global Function for Manifest
     window.memory_intercept_messages = memory_intercept_messages;
 
-    console.log(`[${extensionName}] Rolling Memory System Ready. 🧠`);
+    console.log(`[${extensionName}] Ready. Using Absolute Imports. 🚀`);
 });

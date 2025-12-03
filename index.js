@@ -10,7 +10,7 @@ const { eventSource, event_types, saveSettingsDebounced } = SillyTavern.getConte
 
 // Extension metadata
 const extensionName = 'memory-summarize';
-const extensionFolderPath = `third-party/memory-summarize`;
+const extensionFolderPath = `scripts/extensions/third-party/memory-summarize`;
 
 // Default settings
 const defaultSettings = {
@@ -70,7 +70,7 @@ async function init() {
     // Safety Check: If settings aren't loaded yet, wait for the event
     if (typeof extension_settings === 'undefined') {
         console.log(`[${extensionName}] Settings not ready yet. Waiting for extension_settings_loaded event...`);
-        eventSource.on('extension_settings_loaded', init);
+        eventSource.once('extension_settings_loaded', init);
         return; 
     }
     // --- FIX END ---
@@ -125,8 +125,8 @@ async function setupUI() {
         const button = $(buttonHtml);
         button.on('click', () => toggleConfigPopup());
         
-        // Append to the extension menu container
-        $('#extensions_settings').append(button);
+        // Append to the extension menu container (FIXED: extensions_settings2)
+        $('#extensions_settings2').append(button);
 
         // Load config HTML
         let configHTML = '';
@@ -312,7 +312,7 @@ window.memorySummarize = {
     toggleConfigPopup
 };
 
-// Initialize when jQuery is ready
-jQuery(async () => {
+// Initialize when the script loads (FIXED: No jQuery ready wrapper)
+(async function() {
     await init();
-});
+})();

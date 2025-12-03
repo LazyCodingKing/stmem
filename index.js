@@ -1,11 +1,11 @@
 import {
-    eventSource,
-    event_types,
-    saveSettingsDebounced,
-    getContext
+    saveSettingsDebounced
 } from '../../../../script.js';
 
-import { extension_settings } from '../../../extensions.js';
+import { 
+    extension_settings, 
+    getContext 
+} from '../../../extensions.js';
 
 // ============================================================================
 // CONFIGURATION & DEFAULTS
@@ -53,19 +53,19 @@ const defaultSettings = {
 };
 
 // ============================================================================
-// UTILITY FUNCTIONS (The "Old Method" Helpers)
+// UTILITY FUNCTIONS
 // ============================================================================
 
 function get_extension_directory() {
-    // This calculates the current folder path dynamically, just like index (1).js
+    // Calculates the path dynamically like index (1).js
     let index_path = new URL(import.meta.url).pathname;
     return index_path.substring(0, index_path.lastIndexOf('/'));
 }
 
 function get_settings(key) {
-    // Fail-safe: Try imported settings, then global, then context
     let store = extension_settings?.[extensionName];
     if (!store) {
+        // Fallback to fetching context if direct import fails
         store = getContext().extension_settings?.[extensionName];
     }
     return store?.[key] ?? defaultSettings[key];
@@ -84,7 +84,7 @@ function set_settings(key, value) {
 // ============================================================================
 
 async function load_html() {
-    // THE OLD METHOD: Manual fetch using $.get
+    // Manual fetch using $.get (The "Old Method")
     let module_dir = get_extension_directory();
     let path = `${module_dir}/config.html`;
 
@@ -94,7 +94,6 @@ async function load_html() {
         const response = await $.get(path);
         
         // 1. Create the Popup Container
-        // We append this to body so it floats above everything
         const popupHTML = `
             <div id="memory-config-popup" class="memory-config-popup" style="display:none;">
                  ${response}
@@ -119,16 +118,14 @@ async function load_html() {
         return true;
     } catch (err) {
         console.error(`[${extensionName}] Error loading HTML:`, err);
-        toastr.error("Failed to load Memory Summarize HTML. Check console.");
         return false;
     }
 }
 
 function initialize_settings() {
-    // Ensure settings exist. If 'extension_settings' is null here, we grab it from context.
+    // Ensure settings exist
     let globalStore = extension_settings;
     if (!globalStore) {
-        console.warn(`[${extensionName}] Imported settings were null, using context.`);
         globalStore = getContext().extension_settings;
     }
 
@@ -157,20 +154,18 @@ function bind_ui_listeners() {
 function bind_checkbox(selector, key) {
     const el = $(selector);
     el.prop('checked', get_settings(key));
-    el.on('change', function() {
+    el.off('change').on('change', function() {
         set_settings(key, $(this).prop('checked'));
     });
 }
 
 function toggleConfigPopup() {
     const popup = $('#memory-config-popup');
-    // Using jQuery toggle/show/hide like the old days
     if (popup.is(':visible')) {
         popup.removeClass('visible').hide();
     } else {
         popup.addClass('visible').show();
-        // Refresh values when opening
-        bind_ui_listeners();
+        bind_ui_listeners(); // Refresh values
     }
 }
 
@@ -181,7 +176,7 @@ function applyCSSVariables() {
 }
 
 // ============================================================================
-// MAIN ENTRY POINT (Matching index (1).js style)
+// MAIN ENTRY POINT
 // ============================================================================
 
 jQuery(async function () {
@@ -190,17 +185,23 @@ jQuery(async function () {
     // 1. Initialize Settings
     initialize_settings();
 
-    // 2. Load HTML (The key step)
+    // 2. Load HTML
     await load_html();
 
     // 3. Bind UI
     bind_ui_listeners();
 
     // 4. Register Event Listeners
+    // We get eventSource from getContext() to be safe
+    const context = getContext();
+    const eventSource = context.eventSource;
+    const event_types = context.event_types;
+
     if (eventSource) {
         eventSource.on(event_types.CHAT_CHANGED, () => {
             console.log(`[${extensionName}] Chat changed`);
         });
+        // You can add more listeners here later
     }
 
     console.log(`[${extensionName}] Ready.`);

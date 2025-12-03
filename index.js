@@ -5,8 +5,8 @@
  */
 
 // Get SillyTavern context API
+// NOTE: We do NOT destructure extension_settings here to avoid "undefined" errors on startup
 const { eventSource, event_types, saveSettingsDebounced } = SillyTavern.getContext();
-const { extension_settings } = SillyTavern.getContext();
 
 // Extension metadata
 const extensionName = 'memory-summarize';
@@ -62,11 +62,27 @@ let memoryCache = new Map();
 async function init() {
     console.log(`[${extensionName}] Starting initialization...`);
 
+    // --- FIX START: RACE CONDITION CHECK ---
+    // We fetch the context freshly here to ensure we get the latest objects
+    const context = SillyTavern.getContext();
+    const extension_settings = context.extension_settings;
+
+    // Safety Check: If settings aren't loaded yet, wait for the event
+    if (typeof extension_settings === 'undefined') {
+        console.log(`[${extensionName}] Settings not ready yet. Waiting for extension_settings_loaded event...`);
+        eventSource.on('extension_settings_loaded', init);
+        return; 
+    }
+    // --- FIX END ---
+
     try {
         // Initialize settings
         if (!extension_settings[extensionName]) {
+            console.log(`[${extensionName}] Creating default settings...`);
             extension_settings[extensionName] = { ...defaultSettings };
         }
+        
+        // Link our local 'settings' variable to the global object
         settings = extension_settings[extensionName];
 
         console.log(`[${extensionName}] Settings loaded`);

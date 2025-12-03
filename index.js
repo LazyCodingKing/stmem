@@ -1,20 +1,17 @@
-import { 
-    eventSource, 
-    event_types, 
+import {
+    eventSource,
+    event_types,
     saveSettingsDebounced,
-    renderExtensionTemplateAsync 
+    getContext
 } from '../../../../script.js';
 
-// REMOVED: import { extension_settings } ... 
-// We will access settings globally to avoid the "null" loop.
+import { extension_settings } from '../../../extensions.js';
 
-/**
- * Memory Summarize v2.0
- * Fixed: Uses global context to avoid import race conditions
- */
+// ============================================================================
+// CONFIGURATION & DEFAULTS
+// ============================================================================
 
 const extensionName = 'memory-summarize';
-const extensionFolderPath = `third-party/memory-summarize`;
 
 const defaultSettings = {
     enabled: true,
@@ -55,163 +52,156 @@ const defaultSettings = {
     activeProfile: 'default'
 };
 
-let settings = { ...defaultSettings };
+// ============================================================================
+// UTILITY FUNCTIONS (The "Old Method" Helpers)
+// ============================================================================
 
-/**
- * Load Settings Safe Method
- */
-function loadSettings() {
-    // 1. GET SETTINGS FROM GLOBAL CONTEXT (The Fix)
-    const context = SillyTavern.getContext();
-    const globalSettings = context.extension_settings;
+function get_extension_directory() {
+    // This calculates the current folder path dynamically, just like index (1).js
+    let index_path = new URL(import.meta.url).pathname;
+    return index_path.substring(0, index_path.lastIndexOf('/'));
+}
 
-    if (!globalSettings) {
-        console.warn(`[${extensionName}] Extension settings not available yet.`);
+function get_settings(key) {
+    // Fail-safe: Try imported settings, then global, then context
+    let store = extension_settings?.[extensionName];
+    if (!store) {
+        store = getContext().extension_settings?.[extensionName];
+    }
+    return store?.[key] ?? defaultSettings[key];
+}
+
+function set_settings(key, value) {
+    if (!extension_settings[extensionName]) {
+        extension_settings[extensionName] = { ...defaultSettings };
+    }
+    extension_settings[extensionName][key] = value;
+    saveSettingsDebounced();
+}
+
+// ============================================================================
+// CORE LOGIC
+// ============================================================================
+
+async function load_html() {
+    // THE OLD METHOD: Manual fetch using $.get
+    let module_dir = get_extension_directory();
+    let path = `${module_dir}/config.html`;
+
+    console.log(`[${extensionName}] Loading HTML from: ${path}`);
+
+    try {
+        const response = await $.get(path);
+        
+        // 1. Create the Popup Container
+        // We append this to body so it floats above everything
+        const popupHTML = `
+            <div id="memory-config-popup" class="memory-config-popup" style="display:none;">
+                 ${response}
+            </div>`;
+        
+        if ($('#memory-config-popup').length === 0) {
+            $('body').append(popupHTML);
+        }
+
+        // 2. Create the Menu Button
+        if ($('#memory-summarize-button').length === 0) {
+            const buttonHtml = `
+                <div id="memory-summarize-button" class="list-group-item flex-container flexGap5" title="Memory Summarize v2.0">
+                    <div class="fa-solid fa-brain extensionsMenuExtensionButton"></div> 
+                    <span>Memory Summarize</span>
+                </div>`;
+            $('#extensions_settings').append(buttonHtml);
+            $('#memory-summarize-button').on('click', () => toggleConfigPopup());
+        }
+
+        console.log(`[${extensionName}] HTML Loaded successfully.`);
+        return true;
+    } catch (err) {
+        console.error(`[${extensionName}] Error loading HTML:`, err);
+        toastr.error("Failed to load Memory Summarize HTML. Check console.");
         return false;
     }
+}
 
-    // 2. Initialize defaults if missing
-    if (!globalSettings[extensionName]) {
-        console.log(`[${extensionName}] Creating default settings...`);
-        globalSettings[extensionName] = { ...defaultSettings };
+function initialize_settings() {
+    // Ensure settings exist. If 'extension_settings' is null here, we grab it from context.
+    let globalStore = extension_settings;
+    if (!globalStore) {
+        console.warn(`[${extensionName}] Imported settings were null, using context.`);
+        globalStore = getContext().extension_settings;
+    }
+
+    if (globalStore && !globalStore[extensionName]) {
+        console.log(`[${extensionName}] Initializing default settings...`);
+        globalStore[extensionName] = structuredClone(defaultSettings);
         saveSettingsDebounced();
     }
-
-    // 3. Link local variable
-    settings = globalSettings[extensionName];
-    console.log(`[${extensionName}] Settings loaded.`);
-    return true;
 }
 
-/**
- * Setup UI
- */
-async function setupUI() {
-    // ... button creation ...
+function bind_ui_listeners() {
+    // Close buttons
+    $(document).on('click', '#memory-close-btn, #memory-cancel-btn', function() {
+        $('#memory-config-popup').removeClass('visible').hide();
+    });
 
-    // Manual Fetch Method (Old Style)
-    const response = await fetch('third-party/memory-summarize/config.html');
-    const configHTML = await response.text();
-
-    // ... append to popup ...
+    // Inputs
+    bind_checkbox('#memory-enabled', 'enabled');
+    bind_checkbox('#memory-auto-summarize', 'autoSummarize');
+    bind_checkbox('#memory-display', 'displayMemories');
+    
+    // Apply CSS
+    applyCSSVariables();
 }
 
-/**
- * Setup Event Listeners
- */
-function setupListeners() {
-    if (!eventSource) return;
-
-    eventSource.on(event_types.MESSAGE_RECEIVED, (data) => {
-        if (settings.enabled && settings.autoSummarize) {
-            console.log(`[${extensionName}] Message received.`);
-        }
+function bind_checkbox(selector, key) {
+    const el = $(selector);
+    el.prop('checked', get_settings(key));
+    el.on('change', function() {
+        set_settings(key, $(this).prop('checked'));
     });
-
-    eventSource.on(event_types.CHAT_CHANGED, () => {
-        updateMemoryDisplay();
-    });
-
-    if (window.SlashCommandParser) {
-        window.SlashCommandParser.addCommand('memsum', async (args) => {
-            if (typeof toastr !== 'undefined') toastr.info('Memory summarization triggered');
-            return 'Memory summarization triggered';
-        }, [], 'Manually trigger memory summarization');
-    }
 }
 
 function toggleConfigPopup() {
     const popup = $('#memory-config-popup');
-    popup.toggleClass('visible');
-    if (popup.hasClass('visible')) bindSettingsToUI();
-}
-
-/* ==================== UI HELPER FUNCTIONS ==================== */
-
-function bindSettingsToUI() {
-    bindCheckbox('#memory-enabled', 'enabled');
-    bindCheckbox('#memory-enable-new-chats', 'enableInNewChats');
-    bindCheckbox('#memory-display', 'displayMemories', updateMemoryDisplay);
-    bindCheckbox('#memory-auto-summarize', 'autoSummarize');
-    
-    bindInput('#memory-short-term-limit', 'shortTermLimit', true);
-    bindInput('#memory-long-term-limit', 'longTermLimit', true);
-    bindInput('#memory-message-threshold', 'messageThreshold', true);
-    bindInput('#memory-summary-prompt', 'summaryPrompt');
-
-    bindInput('#memory-color-short', 'colorShortTerm', false, applyCSSVariables);
-    bindInput('#memory-color-long', 'colorLongTerm', false, applyCSSVariables);
-
-    $('#memory-save-btn').off('click').on('click', () => {
-        saveSettingsDebounced();
-        if (typeof toastr !== 'undefined') toastr.success('Settings saved!');
-        $('#memory-config-popup').removeClass('visible');
-    });
-}
-
-function bindCheckbox(selector, key, callback) {
-    const el = $(selector);
-    if (!el.length) return;
-    el.prop('checked', settings[key]);
-    el.off('change').on('change', function() {
-        settings[key] = $(this).prop('checked');
-        saveSettingsDebounced();
-        if (callback) callback();
-    });
-}
-
-function bindInput(selector, key, isNum = false, callback) {
-    const el = $(selector);
-    if (!el.length) return;
-    el.val(settings[key]);
-    el.off('change').on('change', function() {
-        let val = $(this).val();
-        if (isNum) val = parseInt(val) || 0;
-        settings[key] = val;
-        saveSettingsDebounced();
-        if (callback) callback();
-    });
+    // Using jQuery toggle/show/hide like the old days
+    if (popup.is(':visible')) {
+        popup.removeClass('visible').hide();
+    } else {
+        popup.addClass('visible').show();
+        // Refresh values when opening
+        bind_ui_listeners();
+    }
 }
 
 function applyCSSVariables() {
     const root = document.documentElement;
-    root.style.setProperty('--qm-short', settings.colorShortTerm);
-    root.style.setProperty('--qm-long', settings.colorLongTerm);
+    root.style.setProperty('--qm-short', get_settings('colorShortTerm'));
+    root.style.setProperty('--qm-long', get_settings('colorLongTerm'));
 }
 
-function updateMemoryDisplay() {
-    if (!settings.displayMemories) {
-        $('.message-memory').remove();
-    }
-}
-
-// Global Export
-window.memorySummarize = { settings, toggleConfigPopup };
-
 // ============================================================================
-// MAIN INITIALIZATION
+// MAIN ENTRY POINT (Matching index (1).js style)
 // ============================================================================
-jQuery(async () => {
-    // Try loading settings
-    const loaded = loadSettings();
-    
-    if (!loaded) {
-        // If settings were not ready, we hook into the event and retry ONCE
-        // This prevents the infinite loop you were seeing
-        console.log(`[${extensionName}] Waiting for settings event...`);
-        eventSource.once('extension_settings_loaded', () => {
-            loadSettings();
-            setupUI();
-            setupListeners();
-            updateMemoryDisplay();
-            console.log(`[${extensionName}] Extension loaded (delayed)!`);
+
+jQuery(async function () {
+    console.log(`[${extensionName}] Loading extension...`);
+
+    // 1. Initialize Settings
+    initialize_settings();
+
+    // 2. Load HTML (The key step)
+    await load_html();
+
+    // 3. Bind UI
+    bind_ui_listeners();
+
+    // 4. Register Event Listeners
+    if (eventSource) {
+        eventSource.on(event_types.CHAT_CHANGED, () => {
+            console.log(`[${extensionName}] Chat changed`);
         });
-        return;
     }
 
-    // If settings were ready immediately, proceed
-    await setupUI();
-    setupListeners();
-    updateMemoryDisplay();
-    console.log(`[${extensionName}] Extension loaded!`);
+    console.log(`[${extensionName}] Ready.`);
 });

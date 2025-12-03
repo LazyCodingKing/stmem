@@ -1,151 +1,173 @@
-/* index.js - qvink_memory (updated) */
+import {
+    saveSettingsDebounced,
+    generateRaw,
+    eventSource,
+    event_types,
+    getRequestHeaders,
+} from '/scripts/script.js'; // FIXED: Absolute path
 
-/*
-  Defensive, minimal integration with SillyTavern.
-  - Exposes window.memory_intercept_messages for the manifest "generate_interceptor".
-  - Loads/saves extension settings using SillyTavern.libs.localforage if available.
-  - Wires up the settings panel markup (settings.html) if present in the DOM.
-*/
+import {
+    extension_settings,
+    getContext,
+    loadExtensionSettings,
+} from '/scripts/extensions.js'; // FIXED: Absolute path
 
-(async function () {
-  // Helper: safe getter for SillyTavern context
-  function stContextSafe() {
+// ============================================================================
+// CONSTANTS & CONFIG
+// ============================================================================
+
+const extensionName = 'memory-summarize';
+const summaryDivClass = 'qvink_memory_text';
+const MAX_SUMMARY_WORDS = 350; // TOKEN SAVER: Hard limit on summary size
+
+// Default settings (merged with user settings on load)
+const defaultSettings = {
+    enabled: true,
+    autoSummarize: true,
+    messageThreshold: 20, // Summarize every 20 messages
+    master_summary: "",   // The "Rolling Memory" lives here
+};
+
+// ============================================================================
+// HELPER: THE SMART PEELER (HTML/Stats Cleaner)
+// ============================================================================
+function cleanTextForSummary(text) {
+    if (!text) return "";
+
+    // 1. SPECIFIC KILL LIST: Remove UI Stats / Info Boxes completely
+    text = text.replace(/User's Stats[\s\S]*?(?=\n\n|$)/g, "");
+    text = text.replace(/Info Box[\s\S]*?(?=\n\n|$)/g, "");
+    text = text.replace(/Present Characters[\s\S]*?(?=\n\n|$)/g, "");
+
+    // 2. UNWRAP HTML: Handle "Bulletin Boards" or generic code blocks
+    // Remove the ``` markers
+    text = text.replace(/```\w*\n?/g, "").replace(/```/g, "");
+
+    // 3. STRIP TAGS: Remove <div...>, <br>, </span> but keep text
+    text = text.replace(/<[^>]*>/g, " ");
+
+    // 4. CLEANUP: Squash extra spaces
+    text = text.replace(/\s+/g, " ").trim();
+
+    return text;
+}
+
+// ============================================================================
+// CORE LOGIC: ROLLING SUMMARIZATION
+// ============================================================================
+
+async function triggerRollingSummarize() {
+    const context = getContext();
+    const chat = context.chat;
+    
+    // Safety Check: Do we have enough messages?
+    // We only want to summarize the *new* messages since the last run.
+    // For simplicity in this "Rolling" version, we grab the last X messages.
+    const threshold = extension_settings[extensionName].messageThreshold || 20;
+    const recentMessages = chat.slice(-threshold); 
+
+    // 1. Prepare the Text
+    let newEventsText = recentMessages.map(msg => {
+        return `${msg.name}: ${cleanTextForSummary(msg.mes)}`;
+    }).join('\n');
+
+    if (newEventsText.length < 50) return; // Too short to summarize
+
+    // 2. Get the Old Memory
+    let currentMemory = extension_settings[extensionName].master_summary || "No prior history.";
+
+    // 3. Build the "Updater" Prompt
+    const prompt = `
+    You are an expert Story Summarizer. Update the "Current Story Summary" to include the "New Events".
+    
+    [Current Story Summary]:
+    "${currentMemory}"
+
+    [New Events]:
+    "${newEventsText}"
+
+    [INSTRUCTIONS]:
+    - Rewrite the summary to be a seamless narrative.
+    - Merge new events into the history.
+    - Drop very old, irrelevant details if needed to save space.
+    - KEEP THE TOTAL LENGTH UNDER ${MAX_SUMMARY_WORDS} WORDS.
+    - Do not output any explanation, just the new summary text.
+    `;
+
+    console.log(`[${extensionName}] Generating Rolling Summary...`);
+
+    // 4. Call the AI
     try {
-      if (typeof SillyTavern !== "undefined" && SillyTavern.getContext) {
-        return SillyTavern.getContext();
-      }
-    } catch (e) { /* ignore */ }
-    return null;
-  }
+        const newSummary = await generateRaw(prompt, {
+            max_length: 500,
+            temperature: 0.7
+        });
 
-  const ctx = stContextSafe();
-
-  // local persistence (fallback to localStorage if localforage not present)
-  const store = (function () {
-    if (ctx && ctx.libs && ctx.libs.localforage) {
-      const lf = ctx.libs.localforage;
-      return {
-        async get(key){ return lf.getItem(key); },
-        async set(key, value){ return lf.setItem(key, value); }
-      };
+        if (newSummary && newSummary.length > 10) {
+            // 5. Update the Master Memory
+            extension_settings[extensionName].master_summary = newSummary.trim();
+            saveSettingsDebounced();
+            console.log(`[${extensionName}] Memory Updated!`);
+            
+            // Visual Feedback (Optional: Toast or Log)
+            toastr.success("Memory Updated", "Rolling Summary");
+        }
+    } catch (e) {
+        console.error(`[${extensionName}] Summarization Failed:`, e);
     }
-    return {
-      async get(key){ try { return JSON.parse(localStorage.getItem(key)); } catch(e){ return null; } },
-      async set(key, value){ try { localStorage.setItem(key, JSON.stringify(value)); } catch(e){} }
-    };
-  })();
+}
 
-  // default settings
-  const DEFAULT_SETTINGS = {
-    auto_summarize: false,
-    short_term_context_limit: 2000,
-    long_term_context_limit: 8000,
-    // ... add any defaults you need
-  };
+// ============================================================================
+// INTERCEPTOR: INJECT MEMORY INTO PROMPT
+// ============================================================================
+// This function must be registered in manifest.json as "generate_interceptor"
+function memory_intercept_messages(chat, ...args) {
+    if (!extension_settings[extensionName].enabled) return;
 
-  async function loadSettings() {
-    const s = await store.get('qvink_memory_settings');
-    return Object.assign({}, DEFAULT_SETTINGS, s || {});
-  }
-  async function saveSettings(s) {
-    await store.set('qvink_memory_settings', s);
-  }
-
-  // Provide the interceptor function expected in manifest.generate_interceptor
-  // SillyTavern will call this on generation requests; adapt to your logic.
-  window.memory_intercept_messages = async function (generateArgs = {}) {
-    try {
-      // Example: inspect the prompt and optionally modify it
-      const settings = await loadSettings();
-      // If user disabled summarization, return null (no changes)
-      if (!settings.auto_summarize) return null;
-
-      // This is a minimal example: append a short marker to the prompt to show interception.
-      if (generateArgs?.prompt) {
-        generateArgs.prompt = `${generateArgs.prompt}\n\n<!-- qvink-memory marker -->`;
-      }
-      // You can return either modified args or null to indicate no change.
-      return generateArgs;
-    } catch (err) {
-      console.error('qvink_memory interceptor error:', err);
-      return null;
+    const memory = extension_settings[extensionName].master_summary;
+    
+    if (memory && memory.length > 5) {
+        // We inject the memory at the VERY TOP of the context (or depth 0)
+        // This acts like "Author's Note" or "World Info"
+        const memoryBlock = {
+            name: "System",
+            is_system: true,
+            mes: `[STORY SUMMARY SO FAR: ${memory}]`,
+            force_avatar: "system.png"
+        };
+        
+        // Insert at index 0 (Top of context)
+        chat.unshift(memoryBlock);
     }
-  };
+}
 
-  // When DOM becomes available, try to wire up UI (settings.html) controls (defensive).
-  async function wireSettingsUI() {
-    // settings markup (settings.html) likely gets loaded by ST; look for root id
-    const root = document.getElementById('qvink_memory_settings');
-    if (!root) return; // nothing to wire (ok)
-    const settings = await loadSettings();
+// ============================================================================
+// INITIALIZATION
+// ============================================================================
 
-    // helper to find inputs by id and set/get
-    function byId(id){ return root.querySelector(`#${id}`); }
+jQuery(async function () {
+    // 1. Load Settings
+    const settings = await loadExtensionSettings(extensionName);
+    // Merge defaults carefully
+    Object.assign(extension_settings[extensionName], defaultSettings, settings);
 
-    // populate known inputs (only examples — add more as needed)
-    const autoSummCheckbox = byId('auto_summarize');
-    if (autoSummCheckbox) {
-      autoSummCheckbox.checked = !!settings.auto_summarize;
-      autoSummCheckbox.addEventListener('change', async () => {
-        settings.auto_summarize = !!autoSummCheckbox.checked;
-        await saveSettings(settings);
-      });
+    // 2. Register Listeners (No more Timeout race conditions!)
+    if (eventSource) {
+        eventSource.on(event_types.MESSAGE_RECEIVED, async () => {
+            // Check if we hit the threshold to trigger an update
+            const context = getContext();
+            const msgCount = context.chat.length;
+            const threshold = extension_settings[extensionName].messageThreshold;
+            
+            // Simple logic: If total messages is a multiple of threshold (e.g., 20, 40, 60)
+            if (msgCount % threshold === 0) {
+                await triggerRollingSummarize();
+            }
+        });
     }
 
-    const stLimit = byId('short_term_context_limit');
-    if (stLimit) {
-      stLimit.value = settings.short_term_context_limit ?? DEFAULT_SETTINGS.short_term_context_limit;
-      stLimit.addEventListener('change', async () => {
-        settings.short_term_context_limit = parseInt(stLimit.value || 0, 10);
-        await saveSettings(settings);
-      });
-    }
+    // 3. Expose function to global scope (for manifest interceptor)
+    window.memory_intercept_messages = memory_intercept_messages;
 
-    const ltLimit = byId('long_term_context_limit');
-    if (ltLimit) {
-      ltLimit.value = settings.long_term_context_limit ?? DEFAULT_SETTINGS.long_term_context_limit;
-      ltLimit.addEventListener('change', async () => {
-        settings.long_term_context_limit = parseInt(ltLimit.value || 0, 10);
-        await saveSettings(settings);
-      });
-    }
-
-    // Add convenience "Revert Settings" wiring if button exists
-    const revertBtn = root.querySelector('#revert_settings');
-    if (revertBtn) {
-      revertBtn.addEventListener('click', async () => {
-        await saveSettings(DEFAULT_SETTINGS);
-        // refresh UI values
-        if (autoSummCheckbox) autoSummCheckbox.checked = DEFAULT_SETTINGS.auto_summarize;
-        if (stLimit) stLimit.value = DEFAULT_SETTINGS.short_term_context_limit;
-        if (ltLimit) ltLimit.value = DEFAULT_SETTINGS.long_term_context_limit;
-        if (ctx && ctx.notify) ctx.notify('qvink_memory', 'Settings reverted to defaults');
-      });
-    }
-
-    // Optionally register for ST events (if available)
-    if (ctx && ctx.on) {
-      try {
-        // Example: react when presets or API change
-        ctx.on('PRESET_CHANGED', () => { /* update UI if necessary */ });
-      } catch (e) { /* ignore */ }
-    }
-  }
-
-  // Wait for DOM ready then attempt to wire UI
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', wireSettingsUI);
-  } else {
-    wireSettingsUI();
-  }
-
-  // expose a tiny debug helper on window if needed
-  window.qvink_memory = {
-    loadSettings,
-    saveSettings,
-    getContext: () => ctx
-  };
-
-  console.log('qvink_memory: initialized (manifest interceptor available).');
-
-})();
+    console.log(`[${extensionName}] Rolling Memory System Ready. 🧠`);
+});

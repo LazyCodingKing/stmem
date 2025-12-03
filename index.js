@@ -1,8 +1,12 @@
 /**
  * Memory Summarize v2.0 - Main Extension File
  * Corrected for SillyTavern 1.14+ (2025)
- * Proper lazy loading of SillyTavern API
+ * Proper initialization using jQuery ready pattern
  */
+
+// Get SillyTavern context API
+const { eventSource, event_types, callPopup, renderExtensionTemplateAsync, saveSettingsDebounced } = SillyTavern.getContext();
+const { extension_settings } = SillyTavern.getContext();
 
 // Extension metadata
 const extensionName = 'memory-summarize';
@@ -54,42 +58,20 @@ let memoryCache = new Map();
 let isProcessing = false;
 let processingQueue = [];
 
-// API references (will be populated on init)
-let extensionSettings = null;
-let eventSource = null;
-let event_types = null;
-let getContext = null;
-
 /**
- * Initialize extension - gets called by SillyTavern when extension loads
+ * Initialize extension
  */
 async function init() {
   console.log(`[${extensionName}] Starting initialization...`);
   
   try {
-    // Get API from window.SillyTavern or global scope
-    const API = window.SillyTavern || window;
-    
-    if (!API.extensionSettings) {
-      console.error(`[${extensionName}] SillyTavern API not available yet`);
-      return;
+    // Initialize settings
+    if (!extension_settings[extensionName]) {
+      extension_settings[extensionName] = { ...defaultSettings };
     }
+    settings = extension_settings[extensionName];
 
-    // Get references to SillyTavern APIs
-    extensionSettings = API.extensionSettings || {};
-    eventSource = API.eventSource;
-    event_types = API.event_types;
-    getContext = API.getContext || window.getContext;
-
-    console.log(`[${extensionName}] API references obtained`);
-
-    // Load settings
-    if (!extensionSettings[extensionName]) {
-      extensionSettings[extensionName] = { ...defaultSettings };
-    }
-    settings = extensionSettings[extensionName];
-
-    console.log(`[${extensionName}] Settings loaded:`, settings);
+    console.log(`[${extensionName}] Settings loaded`);
 
     // Apply CSS variables
     applyCSSVariables();
@@ -102,12 +84,6 @@ async function init() {
 
     // Register slash commands
     registerSlashCommands();
-
-    // Setup context injection
-    setupContextInjection();
-
-    // Load memories for current chat
-    await loadMemories();
 
     console.log(`[${extensionName}] ✅ Initialization complete`);
   } catch (err) {
@@ -169,7 +145,7 @@ async function setupUI() {
 function registerEventListeners() {
   try {
     if (!eventSource || !event_types) {
-      console.warn(`[${extensionName}] EventSource not available`);
+      console.warn(`[${extensionName}] EventSource not fully available`);
       return;
     }
 
@@ -190,7 +166,6 @@ function registerEventListeners() {
       if (settings.debugMode) {
         console.log(`[${extensionName}] Chat changed`);
       }
-      loadMemories();
     });
 
     console.log(`[${extensionName}] Event listeners registered`);
@@ -214,39 +189,6 @@ function registerSlashCommands() {
     }
   } catch (err) {
     console.warn(`[${extensionName}] Could not register slash commands:`, err);
-  }
-}
-
-/**
- * Setup context injection
- */
-function setupContextInjection() {
-  try {
-    console.log(`[${extensionName}] Context injection setup complete`);
-  } catch (err) {
-    console.error(`[${extensionName}] Context injection setup error:`, err);
-  }
-}
-
-/**
- * Load memories for current chat
- */
-async function loadMemories() {
-  try {
-    if (!getContext) {
-      console.warn(`[${extensionName}] getContext not available`);
-      return;
-    }
-
-    const ctx = getContext();
-    if (!ctx || !ctx.chatId) {
-      console.log(`[${extensionName}] No active chat context`);
-      return;
-    }
-    
-    console.log(`[${extensionName}] Loaded memories for chat: ${ctx.chatId}`);
-  } catch (err) {
-    console.error(`[${extensionName}] Error loading memories:`, err);
   }
 }
 
@@ -332,10 +274,12 @@ window.memorySummarize = {
   memoryCache,
   init,
   toggleConfigPopup,
-  triggerManualSummarization,
-  loadMemories
+  triggerManualSummarization
 };
 
-// Call init when this file loads
-console.log(`[${extensionName}] Script loaded, calling init...`);
-init();
+// Initialize when jQuery is ready (standard SillyTavern pattern)
+jQuery(async () => {
+  console.log(`[${extensionName}] jQuery ready, initializing extension...`);
+  await init();
+  console.log(`[${extensionName}] Extension loaded`);
+});

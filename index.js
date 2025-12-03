@@ -1,9 +1,12 @@
 import {
     saveSettingsDebounced,
     generateQuietPrompt,
-    getContext,
-    extension_settings,
 } from '../../../../script.js';
+
+import { 
+    extension_settings, 
+    getContext 
+} from '../../../extensions.js';
 
 // ============================================================================
 // CONFIGURATION & DEFAULTS
@@ -18,7 +21,7 @@ const defaultSettings = {
     
     // Limits
     shortTermLimit: 2000,
-    shortTermUnit: 'tokens', // 'tokens' or 'percent'
+    shortTermUnit: 'tokens',
     longTermLimit: 4000,
     longTermUnit: 'tokens',
     messageThreshold: 50,
@@ -28,9 +31,7 @@ const defaultSettings = {
     summaryMaxTokens: 150,
     summaryTemperature: 0.1,
     
-    // Connection (Advanced)
-    useSeparatePreset: false,
-    presetName: '',
+    // Connection
     connectionProfile: '',
 
     // Automation
@@ -47,6 +48,7 @@ const defaultSettings = {
     removeMessagesAfterThreshold: false,
     includeUserMessages: false,
     includeSystemMessages: false,
+    includeCharacterMessages: true,
     
     debugMode: false,
     activeProfile: 'default'
@@ -76,18 +78,13 @@ function set_settings(key, value) {
 }
 
 function log(msg, ...args) {
-    if (get_settings('debugMode')) {
-        console.log(`[${extensionName}] ${msg}`, ...args);
-    }
+    console.log(`[${extensionName}] ${msg}`, ...args);
 }
 
 // ============================================================================
 // CORE LOGIC: SUMMARIZATION
 // ============================================================================
 
-/**
- * Main function to handle auto-summarization triggers
- */
 async function triggerAutoSummarize() {
     if (!get_settings('enabled') || !get_settings('autoSummarize')) return;
 
@@ -96,18 +93,17 @@ async function triggerAutoSummarize() {
 
     if (!chat || chat.length === 0) return;
 
-    // Calculate which message to summarize based on "Message Lag"
-    // Lag 0 = Most recent message. Lag 1 = The one before that.
+    // Logic: Determine target message based on lag
     const lag = parseInt(get_settings('messageLag')) || 0;
     const targetIndex = chat.length - 1 - lag;
 
-    if (targetIndex < 0) return; // Not enough messages
+    if (targetIndex < 0) return; 
 
     const targetMsg = chat[targetIndex];
 
-    // Validation Checks
+    // Filters
     if (targetMsg.is_system && !get_settings('includeSystemMessages')) return;
-    if (!targetMsg.is_user && !targetMsg.is_system && !get_settings('includeCharacterMessages', true)) return; // Default true for char
+    if (!targetMsg.is_user && !targetMsg.is_system && !get_settings('includeCharacterMessages')) return;
     if (targetMsg.is_user && !get_settings('includeUserMessages')) return;
     
     // Check if already summarized
@@ -116,20 +112,17 @@ async function triggerAutoSummarize() {
         return;
     }
 
-    // Check Length Threshold
-    const content = targetMsg.mes; // The message text
-    if (content.length < get_settings('messageThreshold')) {
+    // Check Length
+    const content = targetMsg.mes; 
+    if (!content || content.length < get_settings('messageThreshold')) {
         log(`Message ${targetIndex} too short to summarize.`);
         return;
     }
 
-    // Perform Summarization
+    // Execute
     await generateSummaryForMessage(targetIndex, content);
 }
 
-/**
- * Calls the API to generate a summary
- */
 async function generateSummaryForMessage(index, content) {
     log(`Generating summary for message ${index}...`);
     
@@ -137,13 +130,12 @@ async function generateSummaryForMessage(index, content) {
     const prompt = rawPrompt.replace('{{message}}', content);
 
     try {
-        // use generateQuietPrompt to act in background
+        // SillyTavern function to generate text in background
         const result = await generateQuietPrompt(prompt, true, true); 
         
         if (result) {
             log(`Summary generated: ${result}`);
             
-            // Save to chat history
             const context = getContext();
             if (!context.chat[index].extensions) context.chat[index].extensions = {};
             
@@ -154,11 +146,10 @@ async function generateSummaryForMessage(index, content) {
 
             context.saveChat();
             
-            // Refresh UI if enabled
             if (get_settings('displayMemories')) {
-                // Trigger a UI redraw (simplest way is usually to reload chat HTML or specialized function)
-                // For now, we log success.
-                log("Saved to chat.");
+                // In a real scenario, you might trigger a UI refresh here
+                // For now we just log it to ensure it works without breaking the chat render
+                log("Summary saved to chat.");
             }
         }
     } catch (err) {
@@ -177,7 +168,6 @@ async function load_html() {
     try {
         const response = await $.get(path);
         
-        // Ensure container exists
         if ($('#memory-config-popup').length === 0) {
              const popupHTML = `
             <div id="memory-config-popup" class="memory-config-popup" style="display:none;">
@@ -188,7 +178,6 @@ async function load_html() {
             $('#memory-config-popup').html(response);
         }
 
-        // Add Menu Button if missing
         if ($('#memory-summarize-button').length === 0) {
             const buttonHtml = `
                 <div id="memory-summarize-button" class="list-group-item flex-container flexGap5" title="Memory Summarize v2.0">
@@ -212,50 +201,40 @@ function bind_ui_listeners() {
         $('#memory-config-popup').removeClass('visible').hide();
     });
 
-    // 2. Tab Switching Logic (CRITICAL FIX)
+    // 2. Tab Switching
     $(document).off('click', '.memory-config-tab').on('click', '.memory-config-tab', function() {
-        // Visual Active State
         $('.memory-config-tab').removeClass('active');
         $(this).addClass('active');
 
-        // Content Switching
         const targetSection = $(this).data('tab');
         $('.memory-config-section').removeClass('active');
         $(`.memory-config-section[data-section="${targetSection}"]`).addClass('active');
     });
 
-    // 3. Bind Inputs to Settings
-    const checkboxes = [
-        'enabled', 'autoSummarize', 'displayMemories', 
-        'enableInNewChats', 'includeUserMessages', 'includeSystemMessages',
-        'removeMessagesAfterThreshold'
-    ];
+    // 3. Inputs
+    const checkboxes = ['enabled', 'autoSummarize', 'displayMemories', 'enableInNewChats', 'includeUserMessages', 'includeSystemMessages', 'removeMessagesAfterThreshold'];
     
     checkboxes.forEach(key => {
-        const id = `#memory-${key.replace(/[A-Z]/g, m => "-" + m.toLowerCase())}`;
-        // Fix for specific ID mismatches if any, but simplified here:
-        bind_checkbox(`#memory-${key}`, key); // e.g. #memory-enabled
-        // Mapping specific ones if IDs differ in HTML:
-        if(key === 'autoSummarize') bind_checkbox('#memory-auto-summarize', 'autoSummarize');
+        // Helper to handle both camelCase key and hyphenated-id
+        const hyphen = key.replace(/[A-Z]/g, m => "-" + m.toLowerCase());
+        const selector = `#memory-${hyphen}`;
+        
+        bind_checkbox(selector, key);
     });
 
-    // Text/Number Inputs
     bind_input('#memory-short-term-limit', 'shortTermLimit');
     bind_input('#memory-long-term-limit', 'longTermLimit');
     bind_input('#memory-message-threshold', 'messageThreshold');
     bind_input('#memory-max-tokens', 'summaryMaxTokens');
     bind_input('#memory-inject-after', 'startInjectingAfter');
     bind_textarea('#memory-summary-prompt', 'summaryPrompt');
-
-    // Selects
     bind_input('#memory-short-term-unit', 'shortTermUnit');
     bind_input('#memory-long-term-unit', 'longTermUnit');
 
-    // 4. Quick Actions
     $('#memory-save-btn').off('click').on('click', () => {
         $('#memory-config-popup').removeClass('visible').hide();
         saveSettingsDebounced();
-        toastr.success('Settings Saved');
+        if (typeof toastr !== 'undefined') toastr.success('Settings Saved');
     });
     
     applyCSSVariables();
@@ -294,7 +273,7 @@ function toggleConfigPopup() {
         popup.removeClass('visible').hide();
     } else {
         popup.addClass('visible').show();
-        bind_ui_listeners(); // Refresh bindings and values
+        bind_ui_listeners();
     }
 }
 
@@ -326,25 +305,22 @@ jQuery(async function () {
     const event_types = context.event_types;
 
     if (eventSource) {
-        // 1. Chat Loaded
         eventSource.on(event_types.CHAT_CHANGED, () => {
-            log('Chat changed, reloading state...');
+            log('Chat changed.');
         });
 
-        // 2. Message Received (The AI finished replying) - MAIN TRIGGER
+        // Trigger on AI message
         eventSource.on(event_types.MESSAGE_RECEIVED, async (data) => {
-            log('Message received event.');
+            log('Message received. Checking auto-summarize...');
             if (get_settings('autoSummarize')) {
-                // Wait a moment for processing
-                setTimeout(() => triggerAutoSummarize(), 500);
+                setTimeout(() => triggerAutoSummarize(), 1000);
             }
         });
         
-        // 3. Message Sent (User sent a message)
+        // Trigger on User message (if enabled)
         eventSource.on(event_types.MESSAGE_SENT, async () => {
-             // Optional: summarize previous messages if batching
              if (get_settings('autoSummarize') && get_settings('includeUserMessages')) {
-                 setTimeout(() => triggerAutoSummarize(), 500);
+                 setTimeout(() => triggerAutoSummarize(), 1000);
              }
         });
     }

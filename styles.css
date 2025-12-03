@@ -1,0 +1,660 @@
+/**
+ * Memory Summarize v2.0 - Styles
+ * Styling for memory display and UI components
+ */
+
+/* ==================== CSS Variables ==================== */
+:root {
+  --qm-short: #22c55e !important;           /* Green - Short-term memory */
+  --qm-long: #3b82f6 !important;            /* Blue - Long-term memory */
+  --qm-old: #ef4444 !important;             /* Red - Out of context */
+  --qm-default: #9ca3af !important;         /* Light Grey - Not included */
+  --qm-excluded: #6b7280 !important;        /* Dark Grey - Excluded */
+  --qm-message-removed: #d1d5db !important; /* Light Grey - Message removed */
+  
+  --qm-bg-dark: #1f2937;
+  --qm-bg-light: #374151;
+  --qm-border: #4b5563;
+  --qm-text: #f3f4f6;
+  --qm-text-dim: #9ca3af;
+  --qm-hover: #4b5563;
+  
+  --qm-transition: all 0.2s ease;
+}
+
+/* ==================== Extension Button ==================== */
+#memory-summarize-button {
+  cursor: pointer;
+  transition: var(--qm-transition);
+  opacity: 0.7;
+}
+
+#memory-summarize-button:hover {
+  opacity: 1;
+  color: var(--qm-long);
+}
+
+#memory-summarize-button.active {
+  color: var(--qm-short);
+  opacity: 1;
+}
+
+#memory-summarize-button.processing {
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 0.7; }
+  50% { opacity: 1; }
+}
+
+/* ==================== Memory Display in Messages ==================== */
+.message-memory {
+  font-size: 0.85em;
+  margin-top: 8px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.2);
+  border-left: 3px solid;
+  font-style: italic;
+  line-height: 1.4;
+  transition: var(--qm-transition);
+  cursor: pointer;
+  position: relative;
+}
+
+.message-memory:hover {
+  background: rgba(0, 0, 0, 0.3);
+  transform: translateX(2px);
+}
+
+/* Memory status colors */
+.message-memory.short-term {
+  border-left-color: var(--qm-short);
+  color: var(--qm-short);
+}
+
+.message-memory.long-term {
+  border-left-color: var(--qm-long);
+  color: var(--qm-long);
+}
+
+.message-memory.out-of-context {
+  border-left-color: var(--qm-old);
+  color: var(--qm-old);
+}
+
+.message-memory.excluded {
+  border-left-color: var(--qm-excluded);
+  color: var(--qm-excluded);
+  opacity: 0.6;
+}
+
+.message-memory.default {
+  border-left-color: var(--qm-default);
+  color: var(--qm-default);
+  opacity: 0.5;
+}
+
+/* Memory icons */
+.message-memory::before {
+  content: "💭 ";
+  opacity: 0.7;
+  margin-right: 4px;
+}
+
+.message-memory.long-term::before {
+  content: "🧠 ";
+}
+
+.message-memory.excluded::before {
+  content: "🚫 ";
+}
+
+/* Memory actions on hover */
+.message-memory-actions {
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  display: none;
+  gap: 4px;
+}
+
+.message-memory:hover .message-memory-actions {
+  display: flex;
+}
+
+.memory-action-btn {
+  background: rgba(0, 0, 0, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 0.8em;
+  cursor: pointer;
+  transition: var(--qm-transition);
+  color: var(--qm-text);
+}
+
+.memory-action-btn:hover {
+  background: rgba(0, 0, 0, 0.7);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+/* ==================== Config Popup ==================== */
+#memory-config-popup {
+  display: none;
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 90%;
+  max-width: 900px;
+  max-height: 90vh;
+  background: var(--qm-bg-dark);
+  border: 2px solid var(--qm-border);
+  border-radius: 12px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.8);
+  z-index: 9999;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+#memory-config-popup.visible {
+  display: flex;
+}
+
+/* Config header */
+.memory-config-header {
+  padding: 20px 24px;
+  background: var(--qm-bg-light);
+  border-bottom: 1px solid var(--qm-border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.memory-config-title {
+  font-size: 1.4em;
+  font-weight: 600;
+  color: var(--qm-text);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.memory-config-title i {
+  color: var(--qm-long);
+}
+
+.memory-config-close {
+  background: none;
+  border: none;
+  color: var(--qm-text-dim);
+  font-size: 1.5em;
+  cursor: pointer;
+  transition: var(--qm-transition);
+  padding: 4px 8px;
+}
+
+.memory-config-close:hover {
+  color: var(--qm-text);
+  transform: rotate(90deg);
+}
+
+/* Config tabs */
+.memory-config-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 16px 24px 0;
+  background: var(--qm-bg-dark);
+  border-bottom: 1px solid var(--qm-border);
+}
+
+.memory-config-tab {
+  padding: 10px 20px;
+  background: transparent;
+  border: none;
+  color: var(--qm-text-dim);
+  cursor: pointer;
+  transition: var(--qm-transition);
+  border-radius: 8px 8px 0 0;
+  font-size: 0.95em;
+  font-weight: 500;
+}
+
+.memory-config-tab:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--qm-text);
+}
+
+.memory-config-tab.active {
+  background: var(--qm-bg-light);
+  color: var(--qm-text);
+  border-bottom: 2px solid var(--qm-long);
+}
+
+/* Config content */
+.memory-config-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px;
+}
+
+.memory-config-section {
+  display: none;
+  animation: fadeIn 0.3s ease;
+}
+
+.memory-config-section.active {
+  display: block;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.memory-config-group {
+  margin-bottom: 24px;
+  padding: 20px;
+  background: var(--qm-bg-light);
+  border-radius: 8px;
+  border: 1px solid var(--qm-border);
+}
+
+.memory-config-group-title {
+  font-size: 1.1em;
+  font-weight: 600;
+  color: var(--qm-text);
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.memory-config-group-title i {
+  color: var(--qm-long);
+  font-size: 0.9em;
+}
+
+/* Form elements */
+.memory-setting-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  gap: 16px;
+}
+
+.memory-setting-row:last-child {
+  margin-bottom: 0;
+}
+
+.memory-setting-label {
+  flex: 1;
+  color: var(--qm-text);
+  font-size: 0.95em;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.memory-setting-hint {
+  color: var(--qm-text-dim);
+  font-size: 0.85em;
+  margin-top: 4px;
+  font-style: italic;
+}
+
+.memory-setting-control {
+  min-width: 200px;
+}
+
+.memory-input,
+.memory-select,
+.memory-textarea {
+  width: 100%;
+  padding: 8px 12px;
+  background: var(--qm-bg-dark);
+  border: 1px solid var(--qm-border);
+  border-radius: 6px;
+  color: var(--qm-text);
+  font-size: 0.95em;
+  transition: var(--qm-transition);
+}
+
+.memory-input:focus,
+.memory-select:focus,
+.memory-textarea:focus {
+  outline: none;
+  border-color: var(--qm-long);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+.memory-textarea {
+  resize: vertical;
+  min-height: 100px;
+  font-family: monospace;
+}
+
+.memory-checkbox {
+  width: 20px;
+  height: 20px;
+  cursor: pointer;
+  accent-color: var(--qm-long);
+}
+
+.memory-range {
+  width: 100%;
+}
+
+.memory-range-value {
+  display: inline-block;
+  min-width: 60px;
+  text-align: center;
+  color: var(--qm-long);
+  font-weight: 600;
+  margin-left: 12px;
+}
+
+/* Buttons */
+.memory-btn {
+  padding: 10px 20px;
+  background: var(--qm-long);
+  border: none;
+  border-radius: 6px;
+  color: white;
+  font-size: 0.95em;
+  font-weight: 500;
+  cursor: pointer;
+  transition: var(--qm-transition);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.memory-btn:hover {
+  background: #2563eb;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+}
+
+.memory-btn:active {
+  transform: translateY(0);
+}
+
+.memory-btn.secondary {
+  background: var(--qm-bg-light);
+  border: 1px solid var(--qm-border);
+  color: var(--qm-text);
+}
+
+.memory-btn.secondary:hover {
+  background: var(--qm-hover);
+  box-shadow: none;
+}
+
+.memory-btn.danger {
+  background: var(--qm-old);
+}
+
+.memory-btn.danger:hover {
+  background: #dc2626;
+}
+
+.memory-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* Config footer */
+.memory-config-footer {
+  padding: 16px 24px;
+  background: var(--qm-bg-light);
+  border-top: 1px solid var(--qm-border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.memory-config-actions {
+  display: flex;
+  gap: 12px;
+}
+
+.memory-version {
+  color: var(--qm-text-dim);
+  font-size: 0.85em;
+}
+
+/* ==================== Progress Bar ==================== */
+.memory-progress-container {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  width: 300px;
+  background: var(--qm-bg-dark);
+  border: 2px solid var(--qm-border);
+  border-radius: 8px;
+  padding: 16px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  z-index: 10000;
+  display: none;
+}
+
+.memory-progress-container.visible {
+  display: block;
+  animation: slideIn 0.3s ease;
+}
+
+@keyframes slideIn {
+  from { transform: translateX(400px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+.memory-progress-title {
+  font-size: 0.95em;
+  font-weight: 600;
+  color: var(--qm-text);
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.memory-progress-title i {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.memory-progress-bar {
+  width: 100%;
+  height: 8px;
+  background: var(--qm-bg-light);
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+
+.memory-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--qm-long), var(--qm-short));
+  transition: width 0.3s ease;
+  border-radius: 4px;
+}
+
+.memory-progress-text {
+  font-size: 0.85em;
+  color: var(--qm-text-dim);
+  text-align: center;
+}
+
+.memory-progress-stop {
+  margin-top: 12px;
+  width: 100%;
+}
+
+/* ==================== Memory Edit Interface ==================== */
+.memory-edit-interface {
+  position: fixed;
+  top: 60px;
+  right: 20px;
+  width: 400px;
+  max-height: calc(100vh - 80px);
+  background: var(--qm-bg-dark);
+  border: 2px solid var(--qm-border);
+  border-radius: 12px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
+  z-index: 9998;
+  display: none;
+  flex-direction: column;
+}
+
+.memory-edit-interface.visible {
+  display: flex;
+}
+
+.memory-edit-header {
+  padding: 16px;
+  background: var(--qm-bg-light);
+  border-bottom: 1px solid var(--qm-border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.memory-edit-search {
+  flex: 1;
+  margin-right: 12px;
+}
+
+.memory-edit-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+}
+
+.memory-edit-item {
+  padding: 12px;
+  background: var(--qm-bg-light);
+  border: 1px solid var(--qm-border);
+  border-radius: 6px;
+  margin-bottom: 8px;
+  cursor: pointer;
+  transition: var(--qm-transition);
+}
+
+.memory-edit-item:hover {
+  background: var(--qm-hover);
+  border-color: var(--qm-long);
+}
+
+.memory-edit-item.selected {
+  border-color: var(--qm-long);
+  background: rgba(59, 130, 246, 0.1);
+}
+
+.memory-edit-footer {
+  padding: 12px;
+  background: var(--qm-bg-light);
+  border-top: 1px solid var(--qm-border);
+  display: flex;
+  gap: 8px;
+}
+
+/* ==================== Tooltips ==================== */
+.memory-tooltip {
+  position: relative;
+  display: inline-block;
+}
+
+.memory-tooltip .tooltiptext {
+  visibility: hidden;
+  width: 200px;
+  background-color: var(--qm-bg-dark);
+  color: var(--qm-text);
+  text-align: center;
+  border-radius: 6px;
+  padding: 8px;
+  position: absolute;
+  z-index: 10001;
+  bottom: 125%;
+  left: 50%;
+  margin-left: -100px;
+  opacity: 0;
+  transition: opacity 0.3s;
+  font-size: 0.85em;
+  border: 1px solid var(--qm-border);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.memory-tooltip:hover .tooltiptext {
+  visibility: visible;
+  opacity: 1;
+}
+
+/* ==================== Scrollbars ==================== */
+.memory-config-content::-webkit-scrollbar,
+.memory-edit-list::-webkit-scrollbar {
+  width: 8px;
+}
+
+.memory-config-content::-webkit-scrollbar-track,
+.memory-edit-list::-webkit-scrollbar-track {
+  background: var(--qm-bg-dark);
+}
+
+.memory-config-content::-webkit-scrollbar-thumb,
+.memory-edit-list::-webkit-scrollbar-thumb {
+  background: var(--qm-border);
+  border-radius: 4px;
+}
+
+.memory-config-content::-webkit-scrollbar-thumb:hover,
+.memory-edit-list::-webkit-scrollbar-thumb:hover {
+  background: var(--qm-hover);
+}
+
+/* ==================== Responsive Design ==================== */
+@media (max-width: 768px) {
+  #memory-config-popup {
+    width: 95%;
+    max-width: none;
+  }
+  
+  .memory-setting-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  
+  .memory-setting-control {
+    width: 100%;
+    min-width: auto;
+  }
+  
+  .memory-edit-interface {
+    width: 90%;
+    right: 5%;
+  }
+}
+
+/* ==================== Dark Mode Adjustments ==================== */
+body.theme-dark {
+  --qm-bg-dark: #0f1419;
+  --qm-bg-light: #1a1f26;
+  --qm-border: #2d3748;
+}
+
+body.theme-light {
+  --qm-bg-dark: #ffffff;
+  --qm-bg-light: #f7fafc;
+  --qm-border: #e2e8f0;
+  --qm-text: #1a202c;
+  --qm-text-dim: #4a5568;
+}

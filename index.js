@@ -94,7 +94,9 @@ function set_settings(key, value) {
 }
 
 function log(msg, ...args) {
-    console.log(`[${extensionName}] ${msg}`, ...args);
+    if (get_settings('debugMode')) {
+        console.log(`[${extensionName}] ${msg}`, ...args);
+    }
 }
 
 // ============================================================================
@@ -152,7 +154,10 @@ function refreshAllVisuals() {
 // ============================================================================
 
 function refreshContext() {
-    if (!get_settings('enabled')) return;
+    if (!get_settings('enabled')) {
+        getContext().setExtensionPrompt(`${extensionName}`, '');
+        return;
+    }
 
     const context = getContext();
     const chat = context.chat;
@@ -236,7 +241,8 @@ async function generateSummaryForMessage(index, content) {
             prompt: messages,
             trimNames: false,
             prefill: "", 
-            disable_formatting: true 
+            disable_formatting: true,
+            system_prompt: '', // This explicitly overrides the main character prompt for this generation.
         });
         
         if (result) {
@@ -314,7 +320,16 @@ function bind_ui_listeners() {
         const chat = getContext().chat;
         toastr.info("Starting summary of all messages...");
         for (let i = 0; i < chat.length; i++) {
-            await generateSummaryForMessage(i, chat[i].mes);
+            // Only summarize messages that meet the criteria and aren't already summarized
+            const msg = chat[i];
+            const shouldSummarize = 
+                (msg.is_user && get_settings('includeUserMessages')) ||
+                (msg.is_system && get_settings('includeSystemMessages')) ||
+                (!msg.is_user && !msg.is_system && get_settings('includeCharacterMessages'));
+
+            if (shouldSummarize && !msg.extensions?.[extensionName]?.summary && msg.mes.length >= get_settings('messageThreshold')) {
+                await generateSummaryForMessage(i, msg.mes);
+            }
         }
         toastr.success("Finished summarization.");
     });
@@ -382,7 +397,12 @@ function toggleConfigPopup() {
         popup.removeClass('visible').hide();
     } else {
         popup.addClass('visible').show();
-        bind_ui_listeners();
+        // Re-bind settings to UI elements each time it opens to reflect current state
+        bind_checkbox('#memory-enabled', 'enabled');
+        bind_checkbox('#memory-auto-summarize', 'autoSummarize');
+        bind_checkbox('#memory-display', 'displayMemories');
+        bind_input('#memory-message-threshold', 'messageThreshold');
+        bind_textarea('#memory-summary-prompt', 'summaryPrompt');
     }
 }
 

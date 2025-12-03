@@ -1,238 +1,201 @@
-<div id="memory_summarize_settings" class="qvink_memory_settings_content">
-    <div class="inline-drawer">
-        <div class="inline-drawer-toggle inline-drawer-header">
-            <b>Memory Summarize</b>
-            <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
-        </div>
-        <div class="inline-drawer-content">
-
-            <!-- Main Settings -->
-            <div style="margin: 10px 0;">
-                <h3><i class="fa-solid fa-sliders"></i> Main Settings</h3>
-
-                <label class="checkbox_label" for="memory_summarize_enabled">
-                    <input id="memory_summarize_enabled" type="checkbox" />
-                    <span>Enable Memory Summarize</span>
-                </label>
-                <small class="notes">Master switch for the entire extension</small>
-
-                <label class="checkbox_label marginTop10" for="memory_summarize_auto">
-                    <input id="memory_summarize_auto" type="checkbox" />
-                    <span>Auto-Summarize Messages</span>
-                </label>
-                <small class="notes">Automatically summarize messages as they arrive</small>
-
-                <label class="checkbox_label marginTop10" for="memory_summarize_display">
-                    <input id="memory_summarize_display" type="checkbox" />
-                    <span>Display Summaries on Messages</span>
-                </label>
-                <small class="notes">Show inline summaries beneath messages in chat</small>
-            </div>
-
-            <hr>
-
-            <!-- Threshold Settings -->
-            <div style="margin: 10px 0;">
-                <h3><i class="fa-solid fa-gauge-high"></i> Thresholds</h3>
-
-                <label for="memory_summarize_threshold">
-                    <small>Message Threshold</small>
-                </label>
-                <input id="memory_summarize_threshold" class="text_pole" type="number" min="1" max="1000" />
-                <small class="notes">Start auto-summarizing after this many messages</small>
-
-                <label for="memory_summarize_lag" class="marginTop10">
-                    <small>Message Lag</small>
-                </label>
-                <input id="memory_summarize_lag" class="text_pole" type="number" min="0" max="50" />
-                <small class="notes">Don't summarize the last N messages (keeps recent context fresh)</small>
-            </div>
-
-            <hr>
-
-            <!-- Message Types -->
-            <div style="margin: 10px 0;">
-                <h3><i class="fa-solid fa-filter"></i> Message Types to Summarize</h3>
-
-                <label class="checkbox_label" for="memory_summarize_include_character">
-                    <input id="memory_summarize_include_character" type="checkbox" />
-                    <span>Character Messages</span>
-                </label>
-
-                <label class="checkbox_label marginTop10" for="memory_summarize_include_user">
-                    <input id="memory_summarize_include_user" type="checkbox" />
-                    <span>User Messages</span>
-                </label>
-
-                <label class="checkbox_label marginTop10" for="memory_summarize_include_system">
-                    <input id="memory_summarize_include_system" type="checkbox" />
-                    <span>System Messages</span>
-                </label>
-                <small class="notes">Select which message types should be summarized</small>
-            </div>
-
-            <hr>
-
-            <!-- Prompt Configuration -->
-            <div style="margin: 10px 0;">
-                <h3><i class="fa-solid fa-message"></i> Summary Prompt</h3>
-
-                <label for="memory_summarize_prompt">
-                    <small>Summarization Prompt</small>
-                </label>
-                <textarea id="memory_summarize_prompt" class="text_pole textarea_compact" rows="4" placeholder="Enter the prompt used to generate summaries..."></textarea>
-                <small class="notes">Use {{message}} as a placeholder for the message content</small>
-            </div>
-
-            <hr>
-
-            <!-- Memory Template -->
-            <div style="margin: 10px 0;">
-                <h3><i class="fa-solid fa-file-code"></i> Injection Template</h3>
-
-                <label for="memory_summarize_template">
-                    <small>Memory Injection Template</small>
-                </label>
-                <textarea id="memory_summarize_template" class="text_pole textarea_compact" rows="3" placeholder="Template for injecting memories into context..."></textarea>
-                <small class="notes">Use {{memories}} as a placeholder for the summarized memories. This is injected into the prompt.</small>
-            </div>
-
-            <hr>
-
-            <!-- Advanced Options -->
-            <div style="margin: 10px 0;">
-                <h3><i class="fa-solid fa-gear"></i> Advanced Options</h3>
-
-                <label class="checkbox_label" for="memory_summarize_batch">
-                    <input id="memory_summarize_batch" type="checkbox" />
-                    <span>Batch Summarize</span>
-                </label>
-                <small class="notes">Summarize multiple messages at once (may take longer)</small>
-
-                <label class="checkbox_label marginTop10" for="memory_summarize_debug">
-                    <input id="memory_summarize_debug" type="checkbox" />
-                    <span>Debug Mode</span>
-                </label>
-                <small class="notes">Enable console logging for debugging</small>
-            </div>
-
-            <hr>
-
-            <!-- Bulk Actions -->
-            <div style="margin: 10px 0;">
-                <h3><i class="fa-solid fa-bolt"></i> Bulk Actions</h3>
-
-                <div class="flex-container flexnowrap">
-                    <button id="memory_summarize_all" class="menu_button flex1">
-                        <i class="fa-solid fa-wand-magic-sparkles"></i>
-                        <span>Summarize All Messages</span>
-                    </button>
-                </div>
-
-                <div class="flex-container flexnowrap marginTop10">
-                    <button id="memory_summarize_clear_all" class="menu_button caution flex1">
-                        <i class="fa-solid fa-trash-can"></i>
-                        <span>Clear All Summaries</span>
-                    </button>
-                </div>
-
-                <small class="notes">⚠️ Bulk actions may take time and cannot be undone</small>
-            </div>
-
-            <hr>
-
-            <!-- Info Section -->
-            <div style="margin: 10px 0;">
-                <h3><i class="fa-solid fa-circle-info"></i> How to Use</h3>
-                <div style="background: var(--black30a); padding: 10px; border-radius: 5px; margin-top: 5px;">
-                    <p style="margin: 5px 0;"><strong>Automatic Mode:</strong></p>
-                    <ul style="margin: 5px 0; padding-left: 20px;">
-                        <li>Enable "Auto-Summarize" and set your threshold</li>
-                        <li>Messages will be automatically summarized as you chat</li>
-                        <li>Summaries are injected into the prompt context</li>
-                    </ul>
-
-                    <p style="margin: 10px 0 5px 0;"><strong>Manual Mode:</strong></p>
-                    <ul style="margin: 5px 0; padding-left: 20px;">
-                        <li>Click the <i class="fa-solid fa-brain"></i> icon on any message to summarize it</li>
-                        <li>Click an existing summary to edit it</li>
-                        <li>Use slash commands: <code>/summarize &lt;index&gt;</code> or <code>/summarize-all</code></li>
-                    </ul>
-
-                    <p style="margin: 10px 0 5px 0;"><strong>Tips:</strong></p>
-                    <ul style="margin: 5px 0; padding-left: 20px;">
-                        <li>Higher message lag keeps recent context more detailed</li>
-                        <li>Customize the summary prompt for different summary styles</li>
-                        <li>Use batch mode for processing long chats at once</li>
-                    </ul>
-                </div>
-            </div>
-
-            <!-- Version Info -->
-            <div style="margin: 15px 0; text-align: center; opacity: 0.7;">
-                <small>Memory Summarize v2.0.0 - Enhanced for SillyTavern 1.13+</small>
-            </div>
-
-        </div>
+<!-- settings.html — Qvink Memory (headless-compatible) -->
+<div id="qvink_memory_settings" class="qvink_memory_settings_content">
+  <div class="inline-drawer">
+    <div class="inline-drawer-toggle inline-drawer-header">
+      <div class="flex-container alignitemscenter margin0">
+        <b id="qvink_title" title="Message Summarize">Qvink Memory</b>
+        <i id="qvink_popout_button" title="Move config to floating popout" class="fa-solid fa-window-restore menu_button margin0"></i>
+      </div>
+      <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
     </div>
+
+    <div class="inline-drawer-content">
+      <div class="qvink_memory_settings_content">
+        <hr>
+        <div class="flex-container justifyspacebetween alignitemscenter">
+          <button id="toggle_chat_memory" class="menu_button flex2"><span>Toggle Memory</span></button>
+          <button id="refresh_memory" class="menu_button fa-solid fa-sync margin0" title="Refresh memory state"></button>
+        </div>
+
+        <hr>
+        <h4 class="textAlignCenter">Summarization</h4>
+
+        <label class="checkbox_label">
+          <input id="auto_summarize" type="checkbox" />
+          <span>Auto Summarize</span>
+        </label>
+
+        <label class="checkbox_label">
+          <input id="auto_summarize_on_send" type="checkbox" />
+          <span>Before Generation</span>
+        </label>
+
+        <div class="flex-container justifyspacebetween alignitemscenter" style="margin-top:8px;">
+          <label style="display:flex;align-items:center;">
+            <span style="margin-right:.5em">Short-term limit</span>
+            <input id="short_term_context_limit" type="number" min="0" style="width:7em" />
+          </label>
+
+          <label style="display:flex;align-items:center;">
+            <span style="margin-right:.5em">Long-term limit</span>
+            <input id="long_term_context_limit" type="number" min="0" style="width:7em" />
+          </label>
+        </div>
+
+        <hr>
+        <h4 class="textAlignCenter">Misc.</h4>
+
+        <label class="checkbox_label">
+          <input id="debug_mode" type="checkbox" />
+          <span>Debug Mode</span>
+        </label>
+
+        <div style="display:flex;gap:.5rem;justify-content:flex-end;margin-top:8px;">
+          <button id="revert_settings" class="menu_button">Revert</button>
+          <button id="save_settings" class="menu_button">Save</button>
+        </div>
+
+        <hr>
+
+        <div style="font-size:0.9em;color:var(--muted-color,#666);margin-top:6px;">
+          This UI talks to window.qvink_memory (the extension runtime). If you prefer a tiny popup, use qvink_memory.openTinyUI().
+        </div>
+      </div>
+    </div>
+  </div>
 </div>
 
-<style>
-    #memory_summarize_settings .inline-drawer-content {
-        padding: 10px;
+<script>
+(function () {
+  // Robust wiring: wait for the qvink_memory API to be available.
+  // Poll for it up to ~5 seconds (50 attempts at 100ms).
+  function safeById(id) { return document.getElementById(id); }
+
+  // Elements
+  const EL = {
+    auto_summarize: safeById('auto_summarize'),
+    auto_summarize_on_send: safeById('auto_summarize_on_send'),
+    short_term_context_limit: safeById('short_term_context_limit'),
+    long_term_context_limit: safeById('long_term_context_limit'),
+    debug_mode: safeById('debug_mode'),
+    save_settings: safeById('save_settings'),
+    revert_settings: safeById('revert_settings'),
+    refresh_memory: safeById('refresh_memory'),
+    toggle_chat_memory: safeById('toggle_chat_memory')
+  };
+
+  // default UI values in case settings API isn't available yet
+  const UI_DEFAULTS = {
+    auto_summarize: false,
+    auto_summarize_on_send: false,
+    short_term_context_limit: 2000,
+    long_term_context_limit: 8000,
+    debug_mode: false
+  };
+
+  // populate UI from a settings object
+  function populateUI(settings = {}) {
+    const s = Object.assign({}, UI_DEFAULTS, settings || {});
+    if (EL.auto_summarize) EL.auto_summarize.checked = !!s.auto_summarize;
+    if (EL.auto_summarize_on_send) EL.auto_summarize_on_send.checked = !!s.auto_summarize_on_send;
+    if (EL.short_term_context_limit) EL.short_term_context_limit.value = s.short_term_context_limit ?? '';
+    if (EL.long_term_context_limit) EL.long_term_context_limit.value = s.long_term_context_limit ?? '';
+    if (EL.debug_mode) EL.debug_mode.checked = !!s.debug_mode;
+  }
+
+  // read UI values to a settings object
+  function readUI() {
+    return {
+      auto_summarize: !!(EL.auto_summarize && EL.auto_summarize.checked),
+      auto_summarize_on_send: !!(EL.auto_summarize_on_send && EL.auto_summarize_on_send.checked),
+      short_term_context_limit: parseInt(EL.short_term_context_limit?.value || 0, 10) || 0,
+      long_term_context_limit: parseInt(EL.long_term_context_limit?.value || 0, 10) || 0,
+      debug_mode: !!(EL.debug_mode && EL.debug_mode.checked)
+    };
+  }
+
+  // Wiring (attach UI listeners) - called once qvink_memory exists
+  function wireToAPI(api) {
+    // get initial settings and populate
+    api.getSettings().then(populateUI).catch(() => populateUI());
+
+    // Save button
+    if (EL.save_settings) {
+      EL.save_settings.addEventListener('click', async () => {
+        const s = readUI();
+        await api.setSettings(s);
+        if (s.debug_mode) console.log('qvink_memory: settings saved from UI', s);
+      });
     }
 
-    #memory_summarize_settings h3 {
-        margin: 10px 0 10px 0;
-        font-size: 1.1em;
-        color: var(--SmartThemeBodyColor);
+    // Revert - load defaults from API (we rely on the API's defaults if provided)
+    if (EL.revert_settings) {
+      EL.revert_settings.addEventListener('click', async () => {
+        // Attempt to re-load from API (which may hold default profile)
+        const fresh = await api.getSettings().catch(() => null);
+        // If API returned null, use UI_DEFAULTS
+        populateUI(fresh || UI_DEFAULTS);
+      });
     }
 
-    #memory_summarize_settings h3 i {
-        margin-right: 8px;
-        opacity: 0.8;
+    // Live changes for important toggles (optional)
+    if (EL.auto_summarize) {
+      EL.auto_summarize.addEventListener('change', async () => {
+        const partial = { auto_summarize: !!EL.auto_summarize.checked };
+        await api.setSettings(partial);
+      });
+    }
+    if (EL.short_term_context_limit) {
+      EL.short_term_context_limit.addEventListener('change', async () => {
+        const val = parseInt(EL.short_term_context_limit.value || 0, 10) || 0;
+        await api.setSettings({ short_term_context_limit: val });
+      });
     }
 
-    #memory_summarize_settings .notes {
-        display: block;
-        margin-top: 5px;
-        opacity: 0.7;
-        font-style: italic;
+    // refresh memory / toggle memory buttons: call provided API hooks if present
+    if (EL.refresh_memory) {
+      EL.refresh_memory.addEventListener('click', () => {
+        if (typeof api.refreshMemory === 'function') api.refreshMemory();
+        else if (api.getContext && api.getContext()) {
+          try { const ctx = api.getContext(); if (ctx && ctx.emit) ctx.emit('extension_request_refresh'); } catch(e) {}
+        }
+      });
     }
 
-    #memory_summarize_settings hr {
-        margin: 15px 0;
-        border: none;
-        border-top: 1px solid var(--SmartThemeBorderColor);
-        opacity: 0.3;
+    if (EL.toggle_chat_memory) {
+      EL.toggle_chat_memory.addEventListener('click', () => {
+        // If there is a programmatic toggle, call it; otherwise flip a setting
+        if (typeof api.toggle === 'function') {
+          api.toggle('auto_summarize'); // sample toggle - adapt as needed
+        } else {
+          readUI(); // noop
+        }
+      });
     }
+  }
 
-    #memory_summarize_settings .caution {
-        background: var(--crimson70a);
+  // Poll for qvink_memory API
+  let attempts = 0;
+  const maxAttempts = 50;
+  const poll = setInterval(() => {
+    attempts++;
+    if (window.qvink_memory && typeof window.qvink_memory.getSettings === 'function') {
+      clearInterval(poll);
+      try {
+        wireToAPI(window.qvink_memory);
+      } catch (e) { console.error('qvink_memory settings UI wiring failed:', e); }
+      return;
     }
+    if (attempts >= maxAttempts) {
+      clearInterval(poll);
+      // Fallback: populate UI with defaults so settings.html is usable even offline
+      populateUI();
+      console.warn('qvink_memory: API not available; settings UI loaded with defaults.');
+    }
+  }, 100);
 
-    #memory_summarize_settings .caution:hover {
-        background: var(--crimson);
-    }
+  // Also populate quickly with defaults while waiting for API
+  populateUI();
 
-    #memory_summarize_settings code {
-        background: var(--black50a);
-        padding: 2px 6px;
-        border-radius: 3px;
-        font-family: 'Courier New', monospace;
-        font-size: 0.9em;
-    }
-
-    #memory_summarize_settings ul {
-        line-height: 1.6;
-    }
-
-    #memory_summarize_settings textarea {
-        font-family: 'Courier New', monospace;
-        font-size: 0.9em;
-    }
-
-    .marginTop10 {
-        margin-top: 10px;
-    }
-</style>
+})();
+</script>

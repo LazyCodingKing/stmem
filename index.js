@@ -64,7 +64,7 @@ function updateUI() {
     }
 }
 
-// --- Visual Injection (Qvink Style) ---
+// --- Visual Injection ---
 function renderVisuals(errorMsg = null) {
     if (!settings.enabled || !settings.show_visuals) {
         $('.titan-chat-node').remove();
@@ -101,12 +101,13 @@ function renderVisuals(errorMsg = null) {
     }
 }
 
-// --- Injection Logic (Qvink Method) ---
-// Instead of ContextProcessor, we use setExtensionPrompt which works on all versions
+// --- Injection Logic (Legacy Method) ---
+// This replaces the crashing contextProcessors code
 function refreshMemoryInjection() {
     const ctx = getContext();
     const meta = getMeta();
     
+    // If disabled or empty, clear the prompt
     if (!settings.enabled || !meta.summary) {
         ctx.setExtensionPrompt(`${MODULE}_injection`, '');
         return;
@@ -114,8 +115,8 @@ function refreshMemoryInjection() {
 
     const injectionText = `[System Note - Story Memory]:\n${meta.summary}`;
     
-    // Inject into System Prompt (Role 0), Depth 0 (Top)
-    // extensionName, text, position, depth, scan, role
+    // Inject into System Prompt (Role 0), Depth 0 (Top), Scan true, Role 0 (System)
+    // This function exists in all versions of SillyTavern
     ctx.setExtensionPrompt(`${MODULE}_injection`, injectionText, 0, 0, true, 0);
 }
 
@@ -133,21 +134,16 @@ globalThis.titan_intercept_messages = function (chat, contextSize) {
 
     if (pruneLimit > 0) {
         const ctx = getContext();
-        const IGNORE = ctx.symbols.ignore; // Gets the ignore symbol for this ST version
+        const IGNORE = ctx.symbols.ignore; 
 
-        // Iterate backwards from the cut point
-        // Note: 'chat' here is a copy passed by ST, but we need to modify it or the original
-        // The interceptor modifies the array passed to it in-place.
-        
+        // Iterate the chat array passed by the interceptor
         for (let i = 0; i < chat.length; i++) {
-            // Because chat passed to interceptor might be partial, we rely on logic
             // If this message index is older than our limit
             if (i < pruneLimit) {
                 // Set the ignore symbol
                 if (!chat[i][IGNORE]) chat[i][IGNORE] = true;
             }
         }
-        // log(`Pruned ${pruneLimit} messages from context.`);
     }
 };
 
@@ -299,7 +295,9 @@ async function init() {
         setTimeout(renderVisuals, 500); 
     });
 
-    log('Titan Memory v4 (Legacy Core) Loaded.');
+    // REMOVED: ctx.contextProcessors.push(...) - This was causing the crash
+    
+    log('Titan Memory v5 (Fixed) Loaded.');
 }
 
 init();

@@ -1,22 +1,18 @@
 import { getContext, extension_settings, saveMetadataDebounced } from '../../../extensions.js';
-import { saveSettingsDebounced, generateRaw } from '../../../../script.js';
+import { saveSettingsDebounced, generateRaw, amount_gen } from '../../../../script.js';
 
 const MODULE = 'memory-summarize';
 
-const DEFAULT_PROMPT = `[System Note: You are an AI managing the long-term memory of a story.]
-Your job is to update the existing summary with new events.
+const DEFAULT_PROMPT = `Summarize the following story progress.
+Include key events and details.
+Merge the new conversation into the existing memory.
+Keep it concise.
 
 EXISTING MEMORY:
 "{{EXISTING}}"
 
 RECENT CONVERSATION:
 {{NEW_LINES}}
-
-INSTRUCTION:
-Write a consolidated summary in the past tense. 
-Merge the new conversation into the existing memory.
-Keep it concise. Do not lose key details (names, locations, major plot points).
-Do not output anything else, just the summary text.
 
 UPDATED MEMORY:`;
 
@@ -76,8 +72,9 @@ function renderVisuals(errorMsg = null) {
     const lastMsg = chat.children('.mes').last();
     if (lastMsg.length === 0) return;
 
+    // Only add if it's not already there
     if (lastMsg.find('.titan-chat-node').length === 0) {
-        $('.titan-chat-node').remove(); 
+        $('.titan-chat-node').remove(); // Clean old ones
         
         let html = '';
         if (errorMsg) {
@@ -94,12 +91,13 @@ function renderVisuals(errorMsg = null) {
         }
         if (html) lastMsg.find('.mes_text').append(html);
     } else {
-        if (isProcessing) return;
+        // Just update text
+        if (isProcessing) return; // Don't overwrite spinner
         if (meta.summary) lastMsg.find('.titan-memory-content').text(meta.summary);
     }
 }
 
-// --- Injection Logic ---
+// --- Injection Logic (Qvink Method) ---
 function refreshMemoryInjection() {
     const ctx = getContext();
     const meta = getMeta();
@@ -110,15 +108,20 @@ function refreshMemoryInjection() {
     }
 
     const injectionText = `[System Note - Story Memory]:\n${meta.summary}`;
+    
+    // Inject into System Prompt (Role 0), Depth 0 (Top), Scan true, Role 0 (System)
     ctx.setExtensionPrompt(`${MODULE}_injection`, injectionText, 0, 0, true, 0);
 }
 
-// --- Pruning Logic ---
+// --- Pruning Logic (Interceptor Method) ---
+// This function MUST be global, matching the manifest.json "generate_interceptor"
 globalThis.titan_intercept_messages = function (chat, contextSize) {
     if (!settings.enabled || !settings.pruning_enabled) return;
 
     const meta = getMeta();
     const lastIndex = meta.last_index || 0;
+    
+    // Safety buffer: keep the last few messages visible even if summarized
     const buffer = 4;
     const pruneLimit = lastIndex - buffer;
 
@@ -126,15 +129,18 @@ globalThis.titan_intercept_messages = function (chat, contextSize) {
         const ctx = getContext();
         const IGNORE = ctx.symbols.ignore; 
 
+        // Iterate the chat array passed by the interceptor
         for (let i = 0; i < chat.length; i++) {
+            // If this message index is older than our limit
             if (i < pruneLimit) {
+                // Set the ignore symbol
                 if (!chat[i][IGNORE]) chat[i][IGNORE] = true;
             }
         }
     }
 };
 
-// --- Summarizer (Fixed API Call) ---
+// --- Summarizer (Native Method) ---
 async function runSummarization() {
     if (isProcessing) return;
     const ctx = getContext();
@@ -144,7 +150,9 @@ async function runSummarization() {
     const chat = ctx.chat;
     const lastIndex = meta.last_index || 0;
     
-    if (lastIndex >= chat.length) return;
+    if (lastIndex >= chat.length) {
+        return;
+    }
 
     isProcessing = true;
     renderVisuals();
@@ -158,17 +166,11 @@ async function runSummarization() {
         promptText = promptText.replace('{{EXISTING}}', existingMemory);
         promptText = promptText.replace('{{NEW_LINES}}', newLines);
 
-        // FIX: Construct a proper Chat Array for OpenAI compatibility
-        const messages = [
-            { role: 'system', content: 'You are a helpful assistant that summarizes stories.' },
-            { role: 'user', content: promptText }
-        ];
-
-        // FIX: Pass object to generateRaw (Qvink Method)
-        const result = await generateRaw({
-            prompt: messages, // Passing array instead of string
-            max_length: 600,
-            temperature: 0.5,
+        // --- THE FIX: Use Native String Prompt ---
+        // We pass a simple string. ST handles the conversion to Chat/Text format.
+        // We use 'amount_gen' (the user's slider setting) for length.
+        const result = await generateRaw(promptText, {
+            max_length: amount_gen, 
             skip_w_info: true,
             include_jailbreak: false
         });
@@ -183,7 +185,7 @@ async function runSummarization() {
         });
 
         updateUI();
-        refreshMemoryInjection();
+        refreshMemoryInjection(); 
         
     } catch (e) {
         err(e);
@@ -204,6 +206,7 @@ function onNewMessage() {
     const lastIndex = meta.last_index || 0;
     const currentCount = ctx.chat.length;
 
+    // Trigger Check
     const diff = currentCount - lastIndex;
     if (diff >= settings.threshold) {
         runSummarization();
@@ -271,15 +274,22 @@ async function init() {
     setupUI();
 
     const ctx = getContext();
+    
+    // Main Hooks
     ctx.eventSource.on('chat:new-message', onNewMessage);
-    ctx.eventSource.on('chat_message_rendered', () => setTimeout(renderVisuals, 50));
+    
+    // Ensure visuals stick when ST redraws chat
+    ctx.eventSource.on('chat_message_rendered', () => {
+        setTimeout(renderVisuals, 50);
+    });
+    
     ctx.eventSource.on('chat_loaded', () => { 
         updateUI(); 
         refreshMemoryInjection(); 
         setTimeout(renderVisuals, 500); 
     });
 
-    log('Titan Memory v6 (API Fix) Loaded.');
+    log('Titan Memory v7 (Native) Loaded.');
 }
 
 init();

@@ -1,7 +1,7 @@
 import { getContext, extension_settings, saveMetadataDebounced } from '../../../extensions.js';
 import { saveSettingsDebounced, generateRaw, amount_gen } from '../../../../script.js';
 
-const MODULE = 'memory-summarize'; // Must match folder name
+const MODULE = 'memory-summarize';
 
 const DEFAULT_PROMPT = `[System Note: You are an AI managing the long-term memory of a story.]
 Your job is to update the existing summary with new events.
@@ -66,7 +66,7 @@ function updateUI() {
     }
 }
 
-// --- Visual Injection (Qvink Style) ---
+// --- Visual Injection (Fixed Placement) ---
 function renderVisuals(errorMsg = null) {
     if (!settings.enabled || !settings.show_visuals) {
         $('.titan-chat-node').remove();
@@ -75,12 +75,11 @@ function renderVisuals(errorMsg = null) {
 
     const meta = getMeta();
     const chat = $('#chat');
-    // Get the very last message block
     const lastMsg = chat.children('.mes').last();
     
     if (lastMsg.length === 0) return;
 
-    // Remove existing nodes to prevent duplicates
+    // Remove existing nodes
     $('.titan-chat-node').remove();
 
     let html = '';
@@ -97,10 +96,15 @@ function renderVisuals(errorMsg = null) {
             <div class="titan-memory-content" style="white-space: pre-wrap;">${meta.summary}</div></div>`;
     }
 
-    // Inject into the message text area
+    // FIX: Inject AFTER .mes_text, not inside it.
+    // This prevents ST's markdown renderer from wiping our box.
     if (html) {
-        const target = lastMsg.find('.mes_text');
-        if (target.length) target.append(html);
+        const textBlock = lastMsg.find('.mes_text');
+        if (textBlock.length) {
+            textBlock.after(html);
+        } else {
+            lastMsg.append(html);
+        }
     }
 }
 
@@ -115,11 +119,10 @@ function refreshMemoryInjection() {
     }
 
     const injectionText = `[System Note - Story Memory]:\n${meta.summary}`;
-    // extensionName, text, position, depth, scan, role
     ctx.setExtensionPrompt(`${MODULE}_injection`, injectionText, 0, 0, true, 0);
 }
 
-// --- Pruning Logic (Interceptor) ---
+// --- Pruning Logic ---
 globalThis.titan_intercept_messages = function (chat, contextSize) {
     if (!settings.enabled || !settings.pruning_enabled) return;
 
@@ -155,6 +158,7 @@ async function runSummarization() {
     isProcessing = true;
     renderVisuals();
     $('#titan-status').text('Generating summary...');
+    log("Starting generation...");
 
     try {
         const newLines = chat.slice(lastIndex).map(m => `${m.name}: ${m.mes}`).join('\n');
@@ -164,14 +168,8 @@ async function runSummarization() {
         promptText = promptText.replace('{{EXISTING}}', existingMemory);
         promptText = promptText.replace('{{NEW_LINES}}', newLines);
 
-        // Construct Chat Array for compatibility
-        const messages = [
-            { role: 'system', content: 'You are a helpful assistant.' },
-            { role: 'user', content: promptText }
-        ];
-
-        // Call GenerateRaw
-        const result = await generateRaw(messages, {
+        // FIX: Send String, not Array. Safer for all APIs.
+        const result = await generateRaw(promptText, {
             max_length: 600,
             stop: ["INSTRUCTION:", "RECENT CONVERSATION:", "UPDATED MEMORY:"],
             temperature: 0.5,
@@ -182,6 +180,7 @@ async function runSummarization() {
         if (!result) throw new Error("API returned empty text");
 
         let cleanResult = result.trim();
+        log("Generation successful.");
 
         setMeta({
             summary: cleanResult,
@@ -268,14 +267,12 @@ function saveSettings() {
     saveSettingsDebounced();
 }
 
-// --- MAIN ENTRY POINT (Qvink Style) ---
+// --- MAIN ENTRY POINT ---
 jQuery(async function () {
-    log('Initializing Titan Memory v10...');
+    log('Initializing Titan Memory v11...');
 
-    // Load Settings
     settings = { ...defaults, ...(extension_settings[MODULE] || {}) };
 
-    // Load HTML
     const url = new URL(import.meta.url);
     const path = url.pathname.substring(0, url.pathname.lastIndexOf('/'));
     try {
@@ -289,7 +286,7 @@ jQuery(async function () {
     const ctx = getContext();
     const event_types = ctx.event_types;
 
-    // Register Listeners using System Types
+    // Listeners
     ctx.eventSource.on(event_types.USER_MESSAGE_RENDERED, () => {
         log("User message rendered");
         onNewMessage();
@@ -314,5 +311,5 @@ jQuery(async function () {
         setTimeout(renderVisuals, 1000);
     }
 
-    log('Titan Memory v10 Ready.');
+    log('Titan Memory v11 Ready.');
 });

@@ -1,457 +1,116 @@
-<!-- TITAN MEMORY - SETTINGS.HTML -->
-<div id="titan_memory_settings" class="titan_memory_settings_content">
+<div id="titan-memory-settings">
+    <!-- Header -->
     <div class="inline-drawer">
         <div class="inline-drawer-toggle inline-drawer-header">
-            <div class="flex-container alignitemscenter margin0">
-                <b>🛡️ Titan Memory</b>
-                <span style="font-size: 0.75em; opacity: 0.6; margin-left: 8px;">v2.1</span>
-            </div>
+            <b>Titan Memory Configuration</b>
             <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
         </div>
-
         <div class="inline-drawer-content">
-            <div class="titan_memory_settings_content">
-                <hr>
-
-                <!-- Main Controls -->
-                <div class="flex-container justifyspacebetween alignitemscenter">
-                    <button id="titan-toggle-chat" class="menu_button flex1" title="Toggle memory for this chat only">
-                        <i class="fa-solid fa-comments" style="margin-right: 6px;"></i>Toggle Memory
-                    </button>
-                    <button id="titan-now" class="menu_button flex1" title="Manually trigger summarization">
-                        <i class="fa-solid fa-bolt" style="margin-right: 6px;"></i>Summarize Now
-                    </button>
-                </div>
-
-                <!-- NEW: Memory History Viewer Button -->
-                <button id="titan-view-history" class="menu_button" style="width: 100%; margin-top: 10px;" title="View memory history and manage entries">
-                    <i class="fa-solid fa-history" style="margin-right: 6px;"></i>View Memory History
-                </button>
-
-                <hr>
-
-                <!-- Status Section -->
-                <h4 style="margin: 10px 0 8px 0; font-size: 0.95em; border-bottom: 1px solid var(--smart-theme-border); padding-bottom: 4px;">Status</h4>
-                <div id="titan-status" class="titan_status">
-                    <i class="fa-solid fa-circle-info"></i>
-                    <span>Ready.</span>
-                </div>
-
-                <hr>
-
-                <!-- Enable/Disable Options -->
-                <h4 style="margin: 10px 0 8px 0; font-size: 0.95em; border-bottom: 1px solid var(--smart-theme-border); padding-bottom: 4px;">Options</h4>
-
-                <label class="checkbox_label" title="Enable or disable the extension globally">
-                    <input id="titan-enabled" type="checkbox" />
-                    <span>Enable Extension</span>
-                </label>
-
-                <label class="checkbox_label" title="Automatically summarize new messages">
-                    <input id="titan-auto-summarize" type="checkbox" />
-                    <span>Auto-Summarize</span>
-                </label>
-
-                <label class="checkbox_label" title="Show memory notifications in the chat">
-                    <input id="titan-display-memories" type="checkbox" />
-                    <span>Show Memory in Chat</span>
-                </label>
-
-                <label class="checkbox_label" title="Hide old messages from context after summarization to save tokens">
-                    <input id="titan-pruning" type="checkbox" />
-                    <span>Auto-Prune Messages</span>
-                </label>
-
-                <label class="checkbox_label" title="Enable console debug logging">
-                    <input id="titan-debug" type="checkbox" />
-                    <span>Debug Mode</span>
-                </label>
-
-                <hr>
-
-                <!-- Summarization Settings -->
-                <h4 style="margin: 10px 0 8px 0; font-size: 0.95em; border-bottom: 1px solid var(--smart-theme-border); padding-bottom: 4px;">Summarization</h4>
-
-                <label class="checkbox_label" title="Summarize every N messages (1 = every message)">
-                    <input id="titan-threshold" class="titan_input_inline" type="number" min="1" max="50" />
-                    <span>Trigger every N messages</span>
-                </label>
-
-                <label class="checkbox_label" title="Maximum messages to preserve before pruning line">
-                    <input id="titan-buffer-size" class="titan_input_inline" type="number" min="1" max="20" />
-                    <span>Prune Buffer Size</span>
-                </label>
-
-                <label class="checkbox_label" title="Truncate summaries longer than this">
-                    <input id="titan-max-length" class="titan_input_inline" type="number" min="500" max="5000" step="100" />
-                    <span>Max Summary Length</span>
-                </label>
-
-                <hr>
-
-                <!-- Prompt Template -->
-                <h4 style="margin: 10px 0 8px 0; font-size: 0.95em; border-bottom: 1px solid var(--smart-theme-border); padding-bottom: 4px;">Prompt Template</h4>
-                <p style="font-size: 0.8em; opacity: 0.7; margin: 0 0 8px 0;">Use {{EXISTING}} and {{NEW_LINES}} as placeholders</p>
-                <textarea id="titan-prompt-template" class="titan_textarea" placeholder="Prompt template..." style="min-height: 120px;"></textarea>
-                <button id="titan-reset-prompt" class="menu_button" style="margin-top: 8px; width: 100%;">
-                    <i class="fa-solid fa-recycle" style="margin-right: 6px;"></i>Reset to Default
-                </button>
-
-                <hr>
-
-                <!-- Memory Editor -->
-                <h4 style="margin: 10px 0 8px 0; font-size: 0.95em; border-bottom: 1px solid var(--smart-theme-border); padding-bottom: 4px;">Current Memory</h4>
-                <p style="font-size: 0.8em; opacity: 0.7; margin: 0 0 8px 0;">View or edit the AI's memory for this character</p>
-                <textarea id="titan-memory-text" class="titan_textarea" placeholder="Memory will appear here..." style="min-height: 150px;"></textarea>
-
-                <div class="flex-container justifyspacebetween alignitemscenter" style="gap: 8px; margin-top: 10px;">
-                    <button id="titan-save" class="menu_button flex1" title="Save memory changes">
-                        <i class="fa-solid fa-floppy-disk" style="margin-right: 6px;"></i>Save
-                    </button>
-                    <button id="titan-wipe" class="menu_button flex1" title="Delete all memory for this character" style="background: #8b0000;">
-                        <i class="fa-solid fa-trash" style="margin-right: 6px;"></i>Wipe
-                    </button>
-                </div>
-
+            
+            <!-- Main Toggles -->
+            <div class="flex-container align-items-center justify-content-space-between">
+                <label data-i18n="Enabled">Enabled</label>
+                <input type="checkbox" id="titan-enabled" />
             </div>
+            <div class="flex-container align-items-center justify-content-space-between">
+                <label data-i18n="Debug Mode">Debug Mode</label>
+                <input type="checkbox" id="titan-debug" />
+            </div>
+            <div class="flex-container align-items-center justify-content-space-between">
+                <label>Show "Success" Popups</label>
+                <input type="checkbox" id="titan-show-toasts" />
+            </div>
+
+            <hr>
+
+            <!-- Aggressive Pruning Section -->
+            <h3>🛑 Aggressive Pruning</h3>
+            <div class="flex-container align-items-center justify-content-space-between">
+                <label title="If enabled, messages are hidden to keep history under a strict token limit.">Enable Token Budgeting</label>
+                <input type="checkbox" id="titan-pruning" />
+            </div>
+            <div class="flex-container align-items-center justify-content-space-between">
+                <label title="Max tokens to keep in chat history (excluding summary). Older messages are pruned.">Target Context Budget (Tokens)</label>
+                <input type="number" id="titan-token-budget" class="text_pole" min="100" max="10000" placeholder="1000" />
+            </div>
+
+            <hr>
+
+            <!-- Summarization Settings -->
+            <h3>📝 Summarization</h3>
+            <div class="flex-container align-items-center justify-content-space-between">
+                <label>Auto-Summarize</label>
+                <input type="checkbox" id="titan-auto-summarize" />
+            </div>
+            <div class="flex-container align-items-center justify-content-space-between">
+                <label title="Number of new messages before triggering summary.">Message Threshold</label>
+                <input type="number" id="titan-threshold" class="text_pole" min="1" max="20" />
+            </div>
+             <div class="flex-container align-items-center justify-content-space-between">
+                <label title="Max length of the generated summary (Characters).">Max Summary Length</label>
+                <input type="number" id="titan-max-length" class="text_pole" min="100" max="5000" />
+            </div>
+
+            <hr>
+
+            <!-- Lorebook Integration -->
+            <h3>📖 Lorebook Sync</h3>
+            <div class="flex-container align-items-center justify-content-space-between">
+                <label title="Automatically save the summary to a Lorebook entry with dynamic keywords.">Sync Summary to Lorebook</label>
+                <input type="checkbox" id="titan-lorebook-sync" />
+            </div>
+            <div class="flex-container align-items-center justify-content-space-between">
+                <label title="Inject the summary into the prompt normally (Extension Prompt). Disable this if using Lorebook Sync to save tokens!">Inject Summary in Prompt</label>
+                <input type="checkbox" id="titan-inject-prompt" />
+            </div>
+
+            <hr>
+
+            <!-- RAG / Vector Memory -->
+            <h3>🧠 Vector Memory (RAG)</h3>
+            <div class="flex-container align-items-center justify-content-space-between">
+                <label title="Turn old messages into vectors and retrieve them when relevant.">Enable Vector Recall</label>
+                <input type="checkbox" id="titan-rag-enabled" />
+            </div>
+            
+            <div class="flex-container align-items-center justify-content-space-between">
+                <label>Embedding API URL</label>
+                <input type="text" id="titan-rag-url" class="text_pole" placeholder="https://api.openai.com/v1/embeddings" />
+            </div>
+            <div class="flex-container align-items-center justify-content-space-between">
+                <label>Embedding API Key</label>
+                <input type="password" id="titan-rag-key" class="text_pole" placeholder="sk-..." />
+            </div>
+            <div class="flex-container align-items-center justify-content-space-between">
+                <label title="How many past memories to retrieve per generation.">Retrieval Depth</label>
+                <input type="number" id="titan-rag-depth" class="text_pole" min="1" max="10" placeholder="3" />
+            </div>
+
+            <hr>
+
+            <!-- Controls -->
+            <div class="flex-container justify-content-center">
+                 <button id="titan-view-history" class="menu_button">
+                    <i class="fa-solid fa-clock-rotate-left"></i> View History
+                </button>
+                <button id="titan-save" class="menu_button" title="Save changes manually">
+                    <i class="fa-solid fa-save"></i> Save
+                </button>
+                <button id="titan-now" class="menu_button" title="Force Summarize Now">
+                    <i class="fa-solid fa-bolt"></i> Run Now
+                </button>
+                <button id="titan-wipe" class="menu_button red_button" title="Wipe Memory">
+                    <i class="fa-solid fa-trash"></i> Wipe
+                </button>
+            </div>
+            
+            <!-- Prompt Template -->
+            <div style="margin-top: 10px;">
+                <label>Summary Prompt Template</label>
+                <textarea id="titan-prompt-template" class="text_pole" rows="6"></textarea>
+                <button id="titan-reset-prompt" class="menu_button">Reset Prompt</button>
+            </div>
+
         </div>
     </div>
 </div>
-
-<!-- TITAN MEMORY - STYLES.CSS -->
-<style>
-/* =============== TITAN MEMORY STYLES =============== */
-
-/* Main Settings Container */
-.titan_memory_settings_content {
-    padding: 0;
-}
-
-/* Status Display */
-.titan_status {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 10px;
-    background: rgba(0, 100, 255, 0.1);
-    border-left: 3px solid var(--smart-theme-submit-bg);
-    border-radius: 4px;
-    font-size: 0.9rem;
-    color: var(--smart-theme-text-main);
-    margin: 8px 0;
-}
-
-.titan_status.error {
-    background: rgba(255, 0, 0, 0.1);
-    border-left-color: #ff4444;
-    color: #ff6b6b;
-}
-
-.titan_status.success {
-    background: rgba(40, 167, 69, 0.1);
-    border-left-color: #28a745;
-    color: #7cfc00;
-}
-
-.titan_status i {
-    flex-shrink: 0;
-    font-size: 0.95em;
-}
-
-/* Input Fields */
-.titan_input_inline {
-    background: var(--smart-theme-bg);
-    color: var(--smart-theme-text-main);
-    border: 1px solid var(--smart-theme-border);
-    padding: 4px 8px;
-    border-radius: 4px;
-    font-size: 0.9em;
-    width: 70px;
-    margin: 0 8px;
-}
-
-.titan_input_inline:focus {
-    outline: none;
-    border-color: var(--smart-theme-submit-bg);
-    box-shadow: 0 0 4px rgba(0, 102, 255, 0.3);
-}
-
-/* Textarea */
-.titan_textarea {
-    width: 100%;
-    background: var(--smart-theme-bg);
-    color: var(--smart-theme-text-main);
-    border: 1px solid var(--smart-theme-border);
-    border-radius: 4px;
-    padding: 8px;
-    font-family: 'Courier New', monospace;
-    font-size: 0.85rem;
-    line-height: 1.5;
-    resize: vertical;
-    box-sizing: border-box;
-}
-
-.titan_textarea:focus {
-    outline: none;
-    border-color: var(--smart-theme-submit-bg);
-    box-shadow: 0 0 6px rgba(0, 102, 255, 0.2);
-}
-
-/* Override button styling in titan panel */
-.titan_memory_settings_content .menu_button {
-    padding: 8px 12px;
-    border: none;
-    border-radius: 4px;
-    cursor: pointer;
-    font-weight: 600;
-    background: var(--smart-theme-submit-bg);
-    color: var(--smart-theme-submit-text);
-    transition: filter 0.2s ease;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 4px;
-    margin: 0;
-}
-
-.titan_memory_settings_content .menu_button:hover {
-    filter: brightness(1.1);
-}
-
-.titan_memory_settings_content .menu_button:active {
-    filter: brightness(0.9);
-}
-
-/* Checkbox Labels */
-.titan_memory_settings_content .checkbox_label {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-bottom: 8px;
-    cursor: pointer;
-    font-size: 0.95em;
-}
-
-.titan_memory_settings_content .checkbox_label input[type="checkbox"] {
-    width: 18px;
-    height: 18px;
-    cursor: pointer;
-    flex-shrink: 0;
-}
-
-.titan_memory_settings_content .checkbox_label input[type="number"] {
-    background: var(--smart-theme-bg);
-    color: var(--smart-theme-text-main);
-    border: 1px solid var(--smart-theme-border);
-    padding: 4px 6px;
-    border-radius: 3px;
-    font-size: 0.9em;
-    width: 70px;
-}
-
-/* HR Styling */
-.titan_memory_settings_content hr {
-    border: none;
-    border-top: 1px solid var(--smart-theme-border);
-    margin: 12px 0;
-    opacity: 0.5;
-}
-
-/* Headings */
-.titan_memory_settings_content h4 {
-    margin: 10px 0 8px 0;
-    font-size: 0.95em;
-    border-bottom: 1px solid var(--smart-theme-border);
-    padding-bottom: 4px;
-    color: var(--smart-theme-text-main);
-}
-
-/* Paragraphs */
-.titan_memory_settings_content p {
-    font-size: 0.8em;
-    opacity: 0.7;
-    margin: 0 0 8px 0;
-    line-height: 1.4;
-}
-
-/* =============== IN-CHAT VISUALS =============== */
-
-.titan-chat-node {
-    margin-top: 10px;
-    padding: 10px;
-    border-top: 1px solid var(--smart-theme-border);
-    background-color: rgba(0, 0, 0, 0.15);
-    border-radius: 5px;
-    font-size: 0.85em;
-    color: var(--smart-theme-text-main);
-    opacity: 0.9;
-    animation: titanSlideIn 0.3s ease;
-}
-
-.titan-chat-node.error {
-    background-color: rgba(255, 0, 0, 0.1);
-    border-top-color: #ff4444;
-}
-
-.titan-chat-header {
-    font-weight: bold;
-    font-size: 0.8em;
-    text-transform: uppercase;
-    opacity: 0.75;
-    margin-bottom: 4px;
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    color: var(--smart-theme-submit-bg);
-}
-
-.titan-chat-node.error .titan-chat-header {
-    color: #ff6b6b;
-}
-
-.titan-memory-content {
-    line-height: 1.5;
-    white-space: pre-wrap;
-    word-wrap: break-word;
-    font-size: 0.85em;
-    opacity: 0.85;
-}
-
-/* =============== MEMORY VIEWER STYLES =============== */
-
-.titan-memory-card {
-    background: var(--smart-theme-bg);
-    border: 1px solid var(--smart-theme-border);
-    border-radius: 6px;
-    padding: 12px;
-    margin-bottom: 10px;
-    transition: all 0.2s ease;
-}
-
-.titan-memory-card:hover {
-    border-color: var(--smart-theme-submit-bg);
-    box-shadow: 0 2px 8px rgba(0, 102, 255, 0.15);
-}
-
-.memory-card-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 8px;
-    font-size: 0.85em;
-    opacity: 0.7;
-}
-
-.memory-card-date {
-    font-weight: 600;
-}
-
-.memory-card-info {
-    font-style: italic;
-}
-
-.memory-card-content {
-    background: rgba(0, 0, 0, 0.2);
-    padding: 10px;
-    border-radius: 4px;
-    margin-bottom: 8px;
-    line-height: 1.5;
-    font-size: 0.9em;
-    white-space: pre-wrap;
-    word-wrap: break-word;
-}
-
-.memory-card-actions {
-    display: flex;
-    gap: 8px;
-    justify-content: flex-end;
-}
-
-.memory-card-actions button {
-    padding: 6px 12px;
-    border: none;
-    border-radius: 4px;
-    cursor: pointer;
-    background: var(--smart-theme-submit-bg);
-    color: var(--smart-theme-submit-text);
-    font-size: 0.85em;
-    transition: all 0.2s ease;
-}
-
-.memory-card-actions button:hover {
-    filter: brightness(1.15);
-    transform: translateY(-1px);
-}
-
-.memory-card-actions .delete-btn {
-    background: #8b0000;
-}
-
-.save-edit-btn {
-    padding: 6px 12px;
-    border: none;
-    border-radius: 4px;
-    cursor: pointer;
-    background: #28a745;
-    color: white;
-    font-weight: 600;
-}
-
-/* Animation */
-@keyframes titanSlideIn {
-    from {
-        opacity: 0;
-        transform: translateY(-6px);
-    }
-    to {
-        opacity: 0.9;
-        transform: translateY(0);
-    }
-}
-
-/* Responsive Design */
-@media (max-width: 768px) {
-    .titan_memory_settings_content .checkbox_label {
-        flex-wrap: wrap;
-    }
-
-    .titan_textarea {
-        min-height: 100px;
-    }
-
-    .titan_input_inline {
-        width: 60px;
-        margin: 0 4px;
-    }
-
-    .flex-container {
-        flex-wrap: wrap;
-    }
-}
-
-/* Disabled State */
-.titan_memory_settings_content .menu_button:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-    pointer-events: none;
-}
-
-/* Inline Drawer Adjustments */
-.titan_memory_settings_content .inline-drawer {
-    background: transparent;
-    border: none;
-    box-shadow: none;
-}
-
-.titan_memory_settings_content .inline-drawer-header {
-    padding: 8px 0;
-    background: transparent;
-    border: none;
-    margin: 0;
-}
-
-.titan_memory_settings_content .inline-drawer-content {
-    padding: 0;
-    background: transparent;
-}
-</style>

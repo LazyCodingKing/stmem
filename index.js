@@ -1,852 +1,434 @@
-import { getContext, extension_settings, saveMetadataDebounced } from '../../../extensions.js';
-import { saveSettingsDebounced, generateRaw, main_api, chat_metadata } from '../../../../script.js';
+import {
+    getContext,
+    extension_settings,
+    saveMetadataDebounced
+} from "../../../extensions.js";
+import {
+    saveSettingsDebounced,
+    generateRaw,
+    main_api,
+    chat_metadata
+} from "../../../../script.js";
 
-const MODULE_NAME = 'titan-memory';
-const MODULE_NAME_FANCY = 'Titan Memory';
+const MODULENAME = "titan-memory";
+const MODULENAME_FANCY = "Titan Memory";
 
-// Settings defaults
-const default_settings = {
+// Default Settings
+const defaults = {
     enabled: true,
-    threshold: 1,
-    show_visuals: true,
-    pruning_enabled: true,
-    auto_summarize: true,
     debug: true,
-    prompt_template: `[System Note: You are an AI managing the long-term memory of a story.]
+    show_toasts: false, // Default OFF as requested
+    
+    // Summarization
+    autosummarize: true,
+    threshold: 2,
+    maxsummarylength: 1500,
+    prompttemplate: `[System Note: You are an AI managing the long-term memory of a story. 
 Your job is to update the existing summary with new events.
-
 EXISTING MEMORY:
 "{{EXISTING}}"
 
 RECENT CONVERSATION:
-{{NEW_LINES}}
+{{NEWLINES}}
 
 INSTRUCTION:
-Write a consolidated summary in the past tense. 
-Merge the new conversation into the existing memory.
-Keep it concise. Do not lose key details (names, locations, major plot points).
-Do not output anything else, just the summary text.
+1. Write a consolidated summary in the past tense. Merge the new conversation into the existing memory. Keep it concise. 
+2. On a new line, output keywords for this memory in this format: KEYWORDS: name1, location2, item3
+3. Do not output anything else.]`,
 
-UPDATED MEMORY:`,
-    display_memories: true,
-    manual_control: false,
-    buffer_size: 4,
-    max_summary_length: 2000,
+    // Aggressive Pruning
+    pruningenabled: true,
+    tokenbudget: 1000, // Aggressive default
+
+    // Lorebook
+    lorebooksync: false,
+    injectprompt: true, // If false, only relies on lorebook
+
+    // RAG
+    ragenabled: false,
+    ragurl: "https://api.openai.com/v1/embeddings",
+    ragkey: "",
+    ragdepth: 3
 };
 
-const global_settings = {
-    last_character: null,
-};
-
-let settings = {};
-let globalSettings = { ...global_settings };
 let isProcessing = false;
 
-// --- Logging ---
-function log() {
-    console.log(`[${MODULE_NAME_FANCY}]`, ...arguments);
-}
-
-function debug() {
-    if (settings.debug) {
-        log("[DEBUG]", ...arguments);
-    }
-}
-
-function error() {
-    console.error(`[${MODULE_NAME_FANCY}]`, ...arguments);
-    toastr?.error?.(Array.from(arguments).join(' '), MODULE_NAME_FANCY);
-}
+// --- LOGGING & TOASTS ---
+function log(...args) { console.log(`[${MODULENAME_FANCY}]`, ...args); }
+function debug(...args) { if (extension_settings[MODULENAME]?.debug) console.log(`[DEBUG ${MODULENAME_FANCY}]`, ...args); }
+function error(...args) { console.error(`[${MODULENAME_FANCY}]`, ...args); toastr.error(args.join(" "), MODULENAME_FANCY); }
 
 function toast(message, type = "info") {
-    toastr?.[type]?.(message, MODULE_NAME_FANCY);
+    // Feature: Hide success toasts if setting is off
+    if (type === "success" && !getSetting("show_toasts")) return;
+    toastr?.[type]?.(message, MODULENAME_FANCY);
 }
 
-// --- Settings Management ---
-function initialize_settings() {
-    if (extension_settings[MODULE_NAME] !== undefined) {
-        debug("Settings already initialized.");
-        soft_reset_settings();
-    } else {
-        debug("Initializing fresh settings...");
-        hard_reset_settings();
-    }
+// --- SETTINGS HELPERS ---
+function getSetting(key) {
+    return extension_settings[MODULENAME]?.[key] ?? defaults[key];
 }
-
-function hard_reset_settings() {
-    extension_settings[MODULE_NAME] = structuredClone({
-        ...default_settings,
-        ...global_settings,
-    });
-}
-
-function soft_reset_settings() {
-    extension_settings[MODULE_NAME] = Object.assign(
-        structuredClone(default_settings),
-        structuredClone(global_settings),
-        extension_settings[MODULE_NAME]
-    );
-}
-
-function set_settings(key, value, copy = false) {
-    if (copy) {
-        value = structuredClone(value);
-    }
-    extension_settings[MODULE_NAME][key] = value;
+function setSetting(key, value) {
+    if (!extension_settings[MODULENAME]) extension_settings[MODULENAME] = {};
+    extension_settings[MODULENAME][key] = value;
     saveSettingsDebounced();
 }
 
-function get_settings(key, copy = false) {
-    let value = extension_settings[MODULE_NAME]?.[key] ?? default_settings[key];
-    if (copy) {
-        return structuredClone(value);
-    }
-    return value;
+function getChatMetadata(key) {
+    return chat_metadata[MODULENAME]?.[key];
 }
-
-function set_chat_metadata(key, value, copy = false) {
-    if (copy) {
-        value = structuredClone(value);
-    }
-    if (!chat_metadata[MODULE_NAME]) chat_metadata[MODULE_NAME] = {};
-    chat_metadata[MODULE_NAME][key] = value;
+function setChatMetadata(key, value) {
+    if (!chat_metadata[MODULENAME]) chat_metadata[MODULENAME] = {};
+    chat_metadata[MODULENAME][key] = value;
     saveMetadataDebounced();
 }
 
-function get_chat_metadata(key, copy = false) {
-    let value = chat_metadata[MODULE_NAME]?.[key];
-    if (copy) {
-        return structuredClone(value);
-    }
-    return value;
-}
+// --- CORE LOGIC: RAG / VECTOR ---
+async function getEmbedding(text) {
+    const apiKey = getSetting("ragkey");
+    const apiUrl = getSetting("ragurl");
+    if (!apiKey || !text) return null;
 
-// --- API Detection ---
-function isChatCompletionAPI() {
-    const chatAPIs = ['openai', 'claude', 'scale', 'openrouter', 'google', 'anthropic', 'mistralai', 'custom', 'cohere'];
-    return chatAPIs.includes(main_api);
-}
-
-// --- Character/Chat Context ---
-function get_current_character_identifier() {
-    let context = getContext();
-    if (context.groupId) {
-        return context.groupId;
-    }
-    let index = context.characterId;
-    if (!index) {
+    try {
+        const response = await fetch(apiUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${apiKey}` },
+            body: JSON.stringify({ input: text, model: "text-embedding-3-small" })
+        });
+        const data = await response.json();
+        return data?.data?.[0]?.embedding || null;
+    } catch (e) {
+        debug("Embedding Error:", e);
         return null;
     }
-    return context.characters[index]?.avatar || null;
 }
 
-function is_chat_enabled() {
-    return get_chat_metadata('enabled') ?? get_settings('enabled');
-}
-
-function toggle_chat_enabled(value = null) {
-    let current = is_chat_enabled();
-    if (value === null) {
-        value = !current;
-    } else if (value === current) {
-        return;
+function cosineSimilarity(vecA, vecB) {
+    if (!vecA || !vecB || vecA.length !== vecB.length) return 0;
+    let dot = 0, magA = 0, magB = 0;
+    for (let i = 0; i < vecA.length; i++) {
+        dot += vecA[i] * vecB[i];
+        magA += vecA[i] * vecA[i];
+        magB += vecB[i] * vecB[i];
     }
-
-    set_chat_metadata('enabled', value);
-    if (value) {
-        toast('Titan Memory enabled for this chat', 'info');
-    } else {
-        toast('Titan Memory disabled for this chat', 'warning');
-    }
-    updateUI();
-    refresh_memory_injection();
+    return dot / (Math.sqrt(magA) * Math.sqrt(magB));
 }
 
-// --- Metadata Management ---
-function get_chat_memory() {
-    const ctx = getContext();
-    if (!ctx.characterId) return {};
+async function archiveMessageAsVector(text) {
+    if (!getSetting("ragenabled")) return;
+    const vector = await getEmbedding(text);
+    if (!vector) return;
+
+    let store = getChatMetadata("vector_store") || [];
+    store.push({ text: text.substring(0, 500), vector: vector, timestamp: Date.now() }); // Limit text size
+    setChatMetadata("vector_store", store);
+    debug("Archived to Vector Store:", text.substring(0, 20) + "...");
+}
+
+async function retrieveRAGContext(query) {
+    if (!getSetting("ragenabled")) return "";
+    const vector = await getEmbedding(query);
+    if (!vector) return "";
+
+    let store = getChatMetadata("vector_store") || [];
+    if (store.length === 0) return "";
+
+    let scored = store.map(item => ({
+        text: item.text,
+        score: cosineSimilarity(vector, item.vector)
+    }));
+
+    scored.sort((a, b) => b.score - a.score);
+    const depth = getSetting("ragdepth") || 3;
+    const matches = scored.slice(0, depth).filter(m => m.score > 0.7); // Relevance threshold
+
+    if (matches.length > 0) debug("RAG Found:", matches.map(m => m.text));
+    return matches.map(m => m.text).join("\n");
+}
+
+// --- CORE LOGIC: LOREBOOK ---
+async function updateLorebook(summary, keywordsRaw) {
+    if (!getSetting("lorebooksync")) return;
     
-    const char = ctx.characters[ctx.characterId];
-    if (!char?.data?.extensions) {
-        if (char?.data) char.data.extensions = {};
-    }
-    if (!char?.data?.extensions[MODULE_NAME]) {
-        if (char?.data?.extensions) char.data.extensions[MODULE_NAME] = {};
-    }
-    return char?.data?.extensions?.[MODULE_NAME] || {};
-}
-
-function set_chat_memory(data) {
     const ctx = getContext();
     if (!ctx.characterId) return;
-
-    const char = ctx.characters[ctx.characterId];
-    if (!char?.data) return;
-    if (!char.data.extensions) char.data.extensions = {};
-    if (!char.data.extensions[MODULE_NAME]) char.data.extensions[MODULE_NAME] = {};
-
-    Object.assign(char.data.extensions[MODULE_NAME], data);
-    saveMetadataDebounced();
-}
-
-// --- Memory History Management ---
-function get_memory_history() {
-    const memory = get_chat_memory();
-    return memory.history || [];
-}
-
-function add_to_memory_history(summary, messageCount) {
-    const memory = get_chat_memory();
-    if (!memory.history) memory.history = [];
     
-    memory.history.push({
-        summary: summary,
-        timestamp: Date.now(),
-        messageCount: messageCount,
-        id: Date.now() + Math.random()
-    });
+    const charName = ctx.characters[ctx.characterId].name;
+    const bookName = `Titan Memory - ${charName}`;
     
-    // Keep only last 50 entries
-    if (memory.history.length > 50) {
-        memory.history = memory.history.slice(-50);
+    // Parse keywords
+    let keys = ["titan", "memory", "summary"];
+    if (keywordsRaw) {
+        keys = keywordsRaw.split(",").map(k => k.trim()).filter(k => k.length > 0);
     }
+
+    // Find or Create Entry
+    // Note: Implementation depends on ST version. Using generalized logic.
+    let lorebook = ctx.lorebook; 
+    if (!lorebook) return; // Safety
+
+    let entry = lorebook.entries.find(e => e.displayName === bookName || e.key.includes("titan_memory_unique"));
     
-    set_chat_memory(memory);
-}
-
-// --- Memory Viewer Interface ---
-class MemoryViewerInterface {
-    constructor() {
-        this.popup = null;
-        this.$content = null;
-        this.isOpen = false;
-    }
-
-    html_template = `
-<div id="titan_memory_viewer">
-    <div class="flex-container justifyspacebetween alignitemscenter" style="margin-bottom: 15px;">
-        <h3 style="margin: 0;">📋 Memory History</h3>
-        <button id="viewer-refresh" class="menu_button" title="Refresh">
-            <i class="fa-solid fa-refresh"></i>
-        </button>
-    </div>
-    
-    <div id="viewer-stats" style="padding: 10px; background: rgba(0,100,255,0.1); border-radius: 5px; margin-bottom: 15px;">
-        <div><strong>Current Memory:</strong> <span id="stat-current-size">0</span> characters</div>
-        <div><strong>Total Updates:</strong> <span id="stat-total-updates">0</span></div>
-        <div><strong>Messages Processed:</strong> <span id="stat-messages-processed">0</span></div>
-    </div>
-
-    <hr>
-
-    <div id="viewer-current" style="margin-bottom: 20px;">
-        <h4>Current Active Memory</h4>
-        <div class="titan-memory-card">
-            <div class="memory-card-content" id="current-memory-text">No memory yet</div>
-            <div class="memory-card-actions">
-                <button class="copy-btn" data-action="copy-current" title="Copy to clipboard">
-                    <i class="fa-solid fa-copy"></i>
-                </button>
-                <button class="edit-btn" data-action="edit-current" title="Edit">
-                    <i class="fa-solid fa-edit"></i>
-                </button>
-            </div>
-        </div>
-    </div>
-
-    <hr>
-
-    <h4>Memory History (Most Recent First)</h4>
-    <div id="viewer-history" style="max-height: 400px; overflow-y: auto;">
-        <!-- History entries will be inserted here -->
-    </div>
-</div>
-`;
-
-    async show() {
-        const ctx = getContext();
-        this.popup = new ctx.Popup(this.html_template, ctx.POPUP_TYPE.TEXT, undefined, {
-            wider: true,
-            okButton: 'Close'
-        });
-        
-        this.$content = $(this.popup.content);
-        this.$content.closest('dialog').css('min-width', '70%');
-        
-        this.setupEventListeners();
-        this.updateContent();
-        
-        this.isOpen = true;
-        await this.popup.show();
-        this.isOpen = false;
-    }
-
-    setupEventListeners() {
-        const self = this;
-        
-        // Refresh button
-        this.$content.find('#viewer-refresh').on('click', () => {
-            this.updateContent();
-            toast('Memory viewer refreshed', 'info');
-        });
-
-        // Copy buttons
-        this.$content.on('click', '.copy-btn', function() {
-            const action = $(this).data('action');
-            const text = $(this).closest('.titan-memory-card').find('.memory-card-content').text();
-            navigator.clipboard.writeText(text);
-            toast('Copied to clipboard', 'success');
-        });
-
-        // Edit current memory
-        this.$content.on('click', '[data-action="edit-current"]', function() {
-            const $card = $(this).closest('.titan-memory-card');
-            const $content = $card.find('.memory-card-content');
-            const currentText = $content.text();
-            
-            const $textarea = $(`<textarea class="titan_textarea" style="width: 100%; min-height: 100px;">${currentText}</textarea>`);
-            $content.replaceWith($textarea);
-            
-            const $saveBtn = $(`<button class="save-edit-btn" style="margin-top: 5px;">Save</button>`);
-            $(this).replaceWith($saveBtn);
-            
-            $saveBtn.on('click', function() {
-                const newText = $textarea.val();
-                set_chat_memory({ summary: newText, updated_at: Date.now() });
-                refresh_memory_injection();
-                renderVisuals();
-                toast('Memory updated', 'success');
-                self.updateContent();
-            });
-        });
-
-        // Delete history entry
-        this.$content.on('click', '.delete-btn', function() {
-            const id = $(this).data('id');
-            const memory = get_chat_memory();
-            if (memory.history) {
-                memory.history = memory.history.filter(h => h.id !== id);
-                set_chat_memory(memory);
-                self.updateContent();
-                toast('History entry deleted', 'info');
-            }
-        });
-    }
-
-    updateContent() {
-        const memory = get_chat_memory();
-        const history = get_memory_history();
-        
-        // Update stats
-        this.$content.find('#stat-current-size').text(memory.summary?.length || 0);
-        this.$content.find('#stat-total-updates').text(history.length);
-        this.$content.find('#stat-messages-processed').text(memory.last_index || 0);
-        
-        // Update current memory
-        const currentText = memory.summary || 'No memory yet';
-        this.$content.find('#current-memory-text').text(currentText);
-        
-        // Update history
-        const $historyContainer = this.$content.find('#viewer-history');
-        $historyContainer.empty();
-        
-        if (history.length === 0) {
-            $historyContainer.append('<p style="opacity: 0.6;">No history entries yet</p>');
-        } else {
-            // Show in reverse order (most recent first)
-            const reversedHistory = [...history].reverse();
-            reversedHistory.forEach(entry => {
-                const date = new Date(entry.timestamp).toLocaleString();
-                const $entry = $(`
-                    <div class="titan-memory-card" style="margin-bottom: 10px;">
-                        <div class="memory-card-header">
-                            <span class="memory-card-date">${date}</span>
-                            <span class="memory-card-info">(${entry.messageCount} messages)</span>
-                        </div>
-                        <div class="memory-card-content">${this.escapeHtml(entry.summary)}</div>
-                        <div class="memory-card-actions">
-                            <button class="copy-btn" title="Copy">
-                                <i class="fa-solid fa-copy"></i>
-                            </button>
-                            <button class="delete-btn" data-id="${entry.id}" title="Delete">
-                                <i class="fa-solid fa-trash"></i>
-                            </button>
-                        </div>
-                    </div>
-                `);
-                $historyContainer.append($entry);
-            });
-        }
-    }
-
-    escapeHtml(text) {
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
-    }
-}
-
-const memoryViewerInterface = new MemoryViewerInterface();
-
-// --- UI Updates ---
-function updateUI() {
-    if (!document.querySelector('#titan-settings')) return;
-
-    const memory = get_chat_memory();
-    const $memoryText = $('#titan-memory-text');
-
-    if ($memoryText.length && !$memoryText.is(':focus')) {
-        $memoryText.val(memory.summary || '');
-    }
-
-    const ctx = getContext();
-    const lastIndex = memory.last_index || 0;
-    const currentCount = ctx.chat?.length || 0;
-    const pending = Math.max(0, currentCount - lastIndex);
-
-    const $status = $('#titan-status');
-    if ($status.length) {
-        if (isProcessing) {
-            $status.text(`Status: Processing...`);
-        } else {
-            $status.text(`Status: Ready. ${pending} new messages pending.`);
-        }
-    }
-}
-
-// --- Visual Rendering ---
-function renderVisuals(errorMsg = null) {
-    if (!is_chat_enabled() || !get_settings('display_memories')) {
-        $('.titan-chat-node').remove();
-        return;
-    }
-
-    const memory = get_chat_memory();
-    const $chat = $('#chat');
-    const $lastMsg = $chat.children('.mes').last();
-
-    if ($lastMsg.length === 0) {
-        debug('No messages in chat to attach memory to');
-        return;
-    }
-
-    // Remove existing nodes
-    $('.titan-chat-node').remove();
-
-    let html = '';
-    if (errorMsg) {
-        html = `<div class="titan-chat-node error">
-            <div class="titan-chat-header"><i class="fa-solid fa-triangle-exclamation"></i> Memory Error</div>
-            <div class="titan-memory-content">${escapeHtml(errorMsg)}</div>
-        </div>`;
-    } else if (isProcessing) {
-        html = `<div class="titan-chat-node">
-            <div class="titan-chat-header"><i class="fa-solid fa-spinner fa-spin"></i> Updating Memory...</div>
-        </div>`;
-    } else if (memory.summary) {
-        html = `<div class="titan-chat-node">
-            <div class="titan-chat-header"><i class="fa-solid fa-brain"></i> 📝 Memory</div>
-            <div class="titan-memory-content">${escapeHtml(memory.summary)}</div>
-        </div>`;
-        debug('Rendered memory in chat');
+    if (!entry) {
+        // Create New
+        // Assuming standard ST Lorebook Entry structure
+        const newEntry = {
+            uid: Date.now(),
+            displayName: bookName,
+            key: keys,
+            content: summary,
+            enabled: true,
+            insertion_order: 100, // High priority
+            case_sensitive: false,
+            constant: false, // It relies on keywords!
+            position: "before_char_defs"
+        };
+        lorebook.entries.push(newEntry);
+        debug("Created new Lorebook entry.");
     } else {
-        debug('No memory to display yet');
-        return;
+        // Update
+        entry.content = summary;
+        entry.key = keys; // Update dynamic keys
+        debug("Updated Lorebook entry with keys:", keys);
     }
-
-    if (html) {
-        const $textBlock = $lastMsg.find('.mes_text');
-        if ($textBlock.length) {
-            $textBlock.after(html);
-            debug('Memory appended to message');
-        } else {
-            $lastMsg.append(html);
-            debug('Memory appended to message container');
-        }
-    }
+    // Trigger ST save (usually automatic on change, but ensures persistence)
+    // getContext().saveLorebook(); // Hypothetical helper, standard save works on debounced loop
 }
 
-function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-}
-
-// --- Memory Injection ---
-function refresh_memory_injection() {
-    const ctx = getContext();
-    const memory = get_chat_memory();
-
-    if (!is_chat_enabled() || !memory.summary) {
-        ctx.setExtensionPrompt(`${MODULE_NAME}_injection`, '', 0, 0);
-        return;
-    }
-
-    const injectionText = `[Story Memory]:\n${memory.summary}`;
-    debug("Injecting memory into context");
-    ctx.setExtensionPrompt(`${MODULE_NAME}_injection`, injectionText, 0, 0, true, 0);
-}
-
-// --- Pruning ---
-function handle_pruning() {
-    if (!is_chat_enabled() || !get_settings('pruning_enabled')) {
-        debug('Pruning disabled');
-        return;
-    }
+// --- CORE LOGIC: PRUNING (AGGRESSIVE) ---
+async function handlePruning() {
+    if (!getSetting("enabled") || !getSetting("pruningenabled")) return;
 
     const ctx = getContext();
-    const memory = get_chat_memory();
     const chat = ctx.chat;
-
     if (!chat || chat.length === 0) return;
 
-    const lastIndex = memory.last_index || 0;
-    const buffer = get_settings('buffer_size');
-    const pruneLimit = Math.max(0, lastIndex - buffer);
+    // Get the memory pointer (where we last summarized up to)
+    const lastIndex = getChatMetadata("last_index") || 0;
+    
+    // Token Budget Logic
+    const budget = getSetting("tokenbudget") || 1000;
+    let currentTokens = 0;
+    let prunePoint = -1;
 
-    if (pruneLimit > 0) {
-        debug(`Pruning messages: indices 0-${pruneLimit} will be hidden`);
+    // Count backwards
+    for (let i = chat.length - 1; i >= 0; i--) {
+        const msg = chat[i];
+        // Rough estimate if getTokenCount unavailable: 1 token ~ 4 chars
+        const tokens = ctx.getTokenCount ? ctx.getTokenCount(msg.mes) : (msg.mes.length / 3.5);
         
-        for (let i = 0; i < Math.min(pruneLimit, chat.length); i++) {
+        currentTokens += tokens;
+        if (currentTokens > budget) {
+            prunePoint = i;
+            break;
+        }
+    }
+
+    // Safety: Do not prune messages that haven't been summarized yet unless they are VERY old
+    // But for "Aggressive" mode, we prioritize budget.
+    // We should ideally only hide things older than lastIndex to avoid data loss gap.
+    // Let's stick to: Prune anything older than the budget, but Archive it first.
+    
+    if (prunePoint > -1) {
+        debug(`Pruning budget exceeded. Cutoff at index ${prunePoint}.`);
+        
+        for (let i = 0; i <= prunePoint; i++) {
             if (!chat[i].extra) chat[i].extra = {};
-            chat[i].extra.exclude_from_context = true;
+            
+            if (!chat[i].extra.excludefromcontext) {
+                // RAG HOOK: Archive before hiding
+                await archiveMessageAsVector(chat[i].mes);
+                chat[i].extra.excludefromcontext = true; // Hide from LLM
+            }
         }
     }
 }
 
-// --- Summarization ---
-async function run_summarization() {
-    if (isProcessing) {
-        debug('Summarization already in progress');
-        return;
-    }
+// --- CORE LOGIC: SUMMARIZATION ---
+async function runSummarization() {
+    if (isProcessing) return;
+    isProcessing = true;
 
     const ctx = getContext();
-    if (!ctx.characterId) {
-        error('No character loaded');
-        return;
-    }
+    const chat = ctx.chat;
+    const lastIndex = getChatMetadata("last_index") || 0;
 
-    if (!is_chat_enabled()) {
-        debug('Titan Memory disabled for this chat');
-        return;
-    }
+    // Get new messages
+    const newMessages = chat.slice(lastIndex);
+    if (newMessages.length === 0) { isProcessing = false; return; }
 
-    const memory = get_chat_memory();
-    const chat = ctx.chat || [];
-    const lastIndex = memory.last_index || 0;
+    // Format for prompt
+    const newLines = newMessages.map(m => `${m.name}: ${m.mes}`).join("\n");
+    const existingMemory = getChatMetadata("summary") || "No history yet.";
 
-    if (lastIndex >= chat.length) {
-        debug('No new messages to summarize');
-        return;
-    }
+    // Prepare Prompt
+    let prompt = getSetting("prompttemplate")
+        .replace("{{EXISTING}}", existingMemory)
+        .replace("{{NEWLINES}}", newLines);
 
-    isProcessing = true;
-    renderVisuals();
-    updateUI();
-
+    debug("Generating summary...");
+    
     try {
-        const newMessages = chat.slice(lastIndex);
-        const newLines = newMessages
-            .map(m => `${m.name}: ${m.mes}`)
-            .join('\n');
+        const result = await generateRaw(prompt, main_api);
+        if (!result) throw new Error("Empty response");
 
-        const existingMemory = memory.summary || "No history yet.";
+        // Parse Output (Summary vs Keywords)
+        let summary = result;
+        let keywords = "";
 
-        let promptText = get_settings('prompt_template');
-        promptText = promptText.replace('{{EXISTING}}', existingMemory);
-        promptText = promptText.replace('{{NEW_LINES}}', newLines);
-
-        let apiPrompt;
-        if (isChatCompletionAPI()) {
-            debug(`Using Chat Completion (API: ${main_api})`);
-            apiPrompt = [{ role: 'user', content: promptText }];
-        } else {
-            debug(`Using Text Completion (API: ${main_api})`);
-            apiPrompt = promptText;
+        if (result.includes("KEYWORDS:")) {
+            const parts = result.split("KEYWORDS:");
+            summary = parts[0].trim();
+            keywords = parts[1].trim();
         }
+        
+        // Clean Summary
+        summary = summary.replace(/SUMMARY:/gi, "").trim();
 
-        debug(`Generating summary for ${newMessages.length} new messages`);
+        // Save Memory
+        setChatMetadata("summary", summary);
+        setChatMetadata("last_index", chat.length);
+        setChatMetadata("last_updated", Date.now());
 
-        const timeoutPromise = new Promise((_, reject) =>
-            setTimeout(() => reject(new Error('API call timeout (30s)')), 30000)
-        );
+        // Trigger Lorebook Sync
+        await updateLorebook(summary, keywords);
 
-        const result = await Promise.race([
-            generateRaw({
-                prompt: apiPrompt,
-                trimNames: false,
-            }),
-            timeoutPromise
-        ]);
-
-        if (!result || typeof result !== 'string') {
-            throw new Error("API returned invalid response");
-        }
-
-        let cleanResult = result.trim()
-            .replace(/^UPDATED MEMORY:\s*/i, '')
-            .replace(/^["']|["']$/g, '')
-            .trim();
-
-        if (!cleanResult) {
-            throw new Error("Generated summary was empty");
-        }
-
-        const maxLen = get_settings('max_summary_length');
-        if (cleanResult.length > maxLen) {
-            cleanResult = cleanResult.substring(0, maxLen) + "...";
-        }
-
-        debug(`Summary generated: ${cleanResult.length} characters`);
-
-        // Add to history before updating
-        add_to_memory_history(cleanResult, chat.length);
-
-        set_chat_memory({
-            summary: cleanResult,
-            last_index: chat.length,
-            updated_at: Date.now(),
-        });
-
-        updateUI();
-        refresh_memory_injection();
-        handle_pruning();
-        renderVisuals();
-        toast('Memory updated successfully', 'success');
+        toast("Memory updated successfully", "success");
 
     } catch (e) {
-        error(`Summarization failed: ${e.message}`);
-        toast(`Summarization failed: ${e.message}`, 'error');
-        renderVisuals(`Failed: ${e.message}`);
+        error("Summarization failed:", e);
     } finally {
         isProcessing = false;
-        updateUI();
+        handlePruning(); // Prune after update
+        refreshMemoryInjection();
     }
 }
 
-// --- Event Handlers ---
-function on_new_message() {
-    debug('on_new_message triggered');
+// --- INJECTION HANDLERS ---
+function refreshMemoryInjection() {
+    const ctx = getContext();
+    const summary = getChatMetadata("summary");
+
+    // Clear existing injections
+    ctx.setExtensionPrompt(MODULENAME + 'injection', '', 0, 0);
     
-    if (!is_chat_enabled()) {
-        debug('Chat memory not enabled, skipping');
+    // If using Lorebook Sync, we might NOT want to inject prompt (save tokens)
+    if (getSetting("lorebooksync") && !getSetting("injectprompt")) {
+        debug("Injection skipped (Lorebook mode active)");
         return;
     }
-    
-    if (!get_settings('auto_summarize')) {
-        debug('Auto-summarize disabled, skipping');
-        return;
+
+    if (summary && getSetting("enabled")) {
+        const injectionText = `\n[Story Memory: ${summary}]\n`;
+        ctx.setExtensionPrompt(MODULENAME + 'injection', injectionText, 0, 0, true);
     }
+}
+
+// --- EVENT LISTENERS ---
+function onNewMessage() {
+    if (!getSetting("enabled")) return;
 
     const ctx = getContext();
-    if (!ctx.chat || ctx.chat.length === 0) {
-        debug('No chat or empty chat');
-        return;
+    const chat = ctx.chat;
+    const lastIndex = getChatMetadata("last_index") || 0;
+    const threshold = getSetting("threshold") || 2;
+
+    // Auto Summarize Check
+    if (getSetting("autosummarize") && (chat.length - lastIndex >= threshold)) {
+        runSummarization();
     }
 
-    const memory = get_chat_memory();
-    const lastIndex = memory.last_index || 0;
-    const currentCount = ctx.chat.length;
-    const diff = currentCount - lastIndex;
-
-    debug(`New message detected. Last: ${lastIndex}, Current: ${currentCount}, Diff: ${diff}, Threshold: ${get_settings('threshold')}`);
-
-    if (diff >= get_settings('threshold')) {
-        debug('Threshold reached, triggering summarization');
-        run_summarization();
-    } else {
-        debug(`Not at threshold yet (${diff}/${get_settings('threshold')})`);
-        refresh_memory_injection();
-        requestAnimationFrame(() => renderVisuals());
-    }
-    updateUI();
+    // RAG Check (Pre-fetch for next turn)
+    // Not blocking generation, just readying the archive
+    handlePruning(); 
 }
 
-function on_chat_changed() {
-    debug('Chat changed');
-    updateUI();
-    refresh_memory_injection();
-    handle_pruning();
-    requestAnimationFrame(() => renderVisuals());
-}
-
-// --- UI Setup ---
-function setup_ui() {
-    const bind_setting = (id, key, type = 'text', callback = null) => {
-        const $el = $(`#${id}`);
-        if (!$el.length) {
-            debug(`UI element #${id} not found`);
-            return;
-        }
-
-        if (type === 'check') {
-            $el.prop('checked', get_settings(key));
-            $el.on('change', () => {
-                set_settings(key, $el.prop('checked'));
-                refresh_memory_injection();
-                renderVisuals();
-                if (callback) callback();
-            });
-        } else if (type === 'num') {
-            $el.val(get_settings(key));
-            $el.on('change', () => {
-                set_settings(key, Number($el.val()));
-                if (callback) callback();
-            });
-        } else {
-            $el.val(get_settings(key));
-            $el.on('change', () => {
-                set_settings(key, $el.val());
-                if (callback) callback();
-            });
-        }
-    };
-
-    bind_setting('titan-enabled', 'enabled', 'check');
-    bind_setting('titan-display-memories', 'display_memories', 'check', () => renderVisuals());
-    bind_setting('titan-auto-summarize', 'auto_summarize', 'check');
-    bind_setting('titan-pruning', 'pruning_enabled', 'check');
-    bind_setting('titan-show-visuals', 'show_visuals', 'check');
-    bind_setting('titan-threshold', 'threshold', 'num');
-    bind_setting('titan-buffer-size', 'buffer_size', 'num');
-    bind_setting('titan-max-length', 'max_summary_length', 'num');
-    bind_setting('titan-debug', 'debug', 'check');
-    bind_setting('titan-prompt-template', 'prompt_template');
-
-    $('#titan-reset-prompt').on('click', () => {
-        set_settings('prompt_template', default_settings.prompt_template);
-        $('#titan-prompt-template').val(default_settings.prompt_template);
-        toast('Prompt reset to default', 'info');
-    });
-
-    $('#titan-toggle-chat').on('click', () => {
-        toggle_chat_enabled();
-    });
-
-    $('#titan-save').on('click', () => {
-        const newSummary = $('#titan-memory-text').val();
-        set_chat_memory({
-            summary: newSummary,
-            updated_at: Date.now(),
-        });
-        refresh_memory_injection();
-        renderVisuals();
-        toast('Memory saved manually', 'success');
-    });
-
-    $('#titan-now').on('click', () => {
-        debug('Manual summarization triggered');
-        run_summarization();
-    });
-
-    $('#titan-wipe').on('click', () => {
-        if (confirm("Delete all memory for this character? This cannot be undone.")) {
-            set_chat_memory({
-                summary: '',
-                last_index: 0,
-                updated_at: Date.now(),
-                history: []
-            });
-            refresh_memory_injection();
-            renderVisuals();
-            updateUI();
-            toast('Memory wiped', 'info');
-        }
-    });
-
-    // NEW: View Memory History button
-    $('#titan-view-history').on('click', () => {
-        memoryViewerInterface.show();
-    });
-
-    debug('UI setup complete');
-}
-
-async function load_settings_html() {
-    try {
-        const extensionDir = new URL(import.meta.url).pathname;
-        const extensionPath = extensionDir.substring(0, extensionDir.lastIndexOf('/'));
-        const settingsPath = `${extensionPath}/settings.html`;
-        
-        const response = await fetch(settingsPath);
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const html = await response.text();
-        $('#extensions_settings2').append(html);
-        setup_ui();
-        log('Settings UI loaded');
-    } catch (e) {
-        error(`Failed to load settings.html: ${e.message}`);
-    }
-}
-
-// --- MAIN ENTRY POINT ---
-jQuery(async function () {
-    log(`Loading extension...`);
-
-    initialize_settings();
-    settings = structuredClone(extension_settings[MODULE_NAME]);
-
-    await load_settings_html();
-
+// Hook into Generation for RAG Injection
+// We use a global interval or specific ST hook if available. 
+// Standard extension method:
+jQuery(document).ready(function () {
     const ctx = getContext();
-    const eventTypes = ctx.eventTypes || ctx.event_types;
+    
+    // Hook Generation Start for RAG
+    // We try to grab the latest user message and find context
+    if (ctx.eventSource) {
+        ctx.eventSource.on(ctx.eventTypes.GENERATION_STARTED, async () => {
+            if (!getSetting("enabled") || !getSetting("ragenabled")) return;
+            
+            const chat = ctx.chat;
+            const lastMsg = chat[chat.length - 1];
+            if (!lastMsg.is_user) return;
 
-    log('Registering event listeners...');
-    
-    ctx.eventSource.on(eventTypes.USER_MESSAGE_RENDERED, () => {
-        debug('USER_MESSAGE_RENDERED fired');
-        on_new_message();
-    });
-    
-    ctx.eventSource.on(eventTypes.CHARACTER_MESSAGE_RENDERED, () => {
-        debug('CHARACTER_MESSAGE_RENDERED fired');
-        on_new_message();
-    });
-    
-    ctx.eventSource.on(eventTypes.CHAT_CHANGED, () => {
-        debug('CHAT_CHANGED fired');
-        on_chat_changed();
-    });
-    
-    ctx.eventSource.on(eventTypes.GENERATION_STARTED, () => {
-        debug('GENERATION_STARTED fired');
-        handle_pruning();
-    });
-
-    if (ctx.chat && ctx.chat.length > 0) {
-        requestAnimationFrame(() => {
-            updateUI();
-            refresh_memory_injection();
-            renderVisuals();
+            const context = await retrieveRAGContext(lastMsg.mes);
+            if (context) {
+                const ragText = `\n[Relevant Past Memories (RAG):\n${context}\n]`;
+                // Inject temporarily for this generation
+                ctx.setExtensionPrompt(MODULENAME + 'rag', ragText, 0, 0, true);
+                debug("Injected RAG Context");
+            } else {
+                ctx.setExtensionPrompt(MODULENAME + 'rag', '', 0, 0);
+            }
         });
+
+        // Normal triggers
+        ctx.eventSource.on(ctx.eventTypes.USER_MESSAGE_RENDERED, onNewMessage);
+        ctx.eventSource.on(ctx.eventTypes.CHARACTER_MESSAGE_RENDERED, onNewMessage);
     }
 
-    log(`Extension loaded successfully`);
+    // Load UI
+    loadSettingsHTML();
 });
 
-globalThis.titan_memory_intercept = function (chat, _contextSize, _abort, type) {
-    if (!is_chat_enabled() || !get_settings('pruning_enabled')) {
-        return;
-    }
+// --- UI SETUP ---
+async function loadSettingsHTML() {
+    const response = await fetch(`${import.meta.url.substring(0, import.meta.url.lastIndexOf('/'))}/settings.html`);
+    const html = await response.text();
+    $('#extensions_settings').append(html); // Append to standard location
 
-    const memory = get_chat_memory();
-    const lastIndex = memory.last_index || 0;
-    const buffer = get_settings('buffer_size');
-    const pruneLimit = Math.max(0, lastIndex - buffer);
+    // Bind Inputs
+    bindInput("#titan-enabled", "enabled");
+    bindInput("#titan-debug", "debug");
+    bindInput("#titan-show-toasts", "show_toasts");
+    bindInput("#titan-pruning", "pruningenabled");
+    bindInput("#titan-token-budget", "tokenbudget");
+    bindInput("#titan-auto-summarize", "autosummarize");
+    bindInput("#titan-threshold", "threshold");
+    bindInput("#titan-max-length", "maxsummarylength");
+    bindInput("#titan-lorebook-sync", "lorebooksync");
+    bindInput("#titan-inject-prompt", "injectprompt");
+    bindInput("#titan-rag-enabled", "ragenabled");
+    bindInput("#titan-rag-url", "ragurl");
+    bindInput("#titan-rag-key", "ragkey");
+    bindInput("#titan-rag-depth", "ragdepth");
+    bindInput("#titan-prompt-template", "prompttemplate");
 
-    if (pruneLimit <= 0) return;
-
-    let start = chat.length - 1;
-    if (type === 'continue') start--;
-
-    for (let i = 0; i < Math.min(pruneLimit, chat.length); i++) {
-        if (!chat[i].extra) chat[i].extra = {};
-        
-        const IGNORE_SYMBOL = getContext().symbols?.ignore;
-        if (IGNORE_SYMBOL) {
-            chat[i].extra[IGNORE_SYMBOL] = true;
+    // Buttons
+    $("#titan-now").click(() => runSummarization());
+    $("#titan-save").click(() => toast("Settings Saved"));
+    $("#titan-wipe").click(() => {
+        if(confirm("Wipe memory?")) {
+            setChatMetadata("summary", "");
+            setChatMetadata("last_index", 0);
+            setChatMetadata("vector_store", []);
+            toast("Memory Wiped", "error");
         }
-    }
-};
+    });
+    
+    log("Titan Memory UI Loaded");
+}
+
+function bindInput(selector, key) {
+    const $el = $(selector);
+    const type = $el.attr("type") === "checkbox" ? "checked" : "val";
+    
+    // Init value
+    const val = getSetting(key);
+    if (type === "checked") $el.prop("checked", val);
+    else $el.val(val);
+
+    // Bind change
+    $el.on("change input", function() {
+        const newVal = type === "checked" ? $(this).prop("checked") : $(this).val();
+        setSetting(key, newVal);
+    });
+}

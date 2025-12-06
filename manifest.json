@@ -1,13 +1,16 @@
 {
-    "display_name": "qvink_memory",
-    "loading_order": 1,
+    "display_name": "Titan Memory",
+    "loading_order": 2,
     "requires": [],
-    "optional": [],
+    "optional": ["connection_profiles"],
     "minimum_client_version": "1.13.2",
     "js": "index.js",
-    "css": "style.css",
-    "author": "qvink",
-    "version": "1.2.7",
-  "html": "settings.html",
-  "generate_interceptor": "titan_intercept_messages"
+    "html": "settings.html",
+    "author": "Your Name",
+    "version": "2.0.0",
+    "description": "Advanced long-term memory management with automatic summarization. Maintains character memory across conversations with intelligent message pruning.",
+    "homepage": "https://github.com/yourusername/titan-memory",
+    "i18n": {
+        "en": "locales/en.json"
+    }
 }

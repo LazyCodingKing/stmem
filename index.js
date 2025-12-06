@@ -76,9 +76,8 @@ function renderVisuals(errorMsg = null) {
     const lastMsg = chat.children('.mes').last();
     if (lastMsg.length === 0) return;
 
-    // Only add if it's not already there
     if (lastMsg.find('.titan-chat-node').length === 0) {
-        $('.titan-chat-node').remove(); // Clean old ones
+        $('.titan-chat-node').remove(); 
         
         let html = '';
         if (errorMsg) {
@@ -95,40 +94,31 @@ function renderVisuals(errorMsg = null) {
         }
         if (html) lastMsg.find('.mes_text').append(html);
     } else {
-        // Just update text
-        if (isProcessing) return; // Don't overwrite spinner
+        if (isProcessing) return;
         if (meta.summary) lastMsg.find('.titan-memory-content').text(meta.summary);
     }
 }
 
-// --- Injection Logic (Legacy Method) ---
-// This replaces the crashing contextProcessors code
+// --- Injection Logic ---
 function refreshMemoryInjection() {
     const ctx = getContext();
     const meta = getMeta();
     
-    // If disabled or empty, clear the prompt
     if (!settings.enabled || !meta.summary) {
         ctx.setExtensionPrompt(`${MODULE}_injection`, '');
         return;
     }
 
     const injectionText = `[System Note - Story Memory]:\n${meta.summary}`;
-    
-    // Inject into System Prompt (Role 0), Depth 0 (Top), Scan true, Role 0 (System)
-    // This function exists in all versions of SillyTavern
     ctx.setExtensionPrompt(`${MODULE}_injection`, injectionText, 0, 0, true, 0);
 }
 
-// --- Pruning Logic (Interceptor Method) ---
-// This function MUST be global, matching the manifest.json "generate_interceptor"
+// --- Pruning Logic ---
 globalThis.titan_intercept_messages = function (chat, contextSize) {
     if (!settings.enabled || !settings.pruning_enabled) return;
 
     const meta = getMeta();
     const lastIndex = meta.last_index || 0;
-    
-    // Safety buffer: keep the last few messages visible even if summarized
     const buffer = 4;
     const pruneLimit = lastIndex - buffer;
 
@@ -136,18 +126,15 @@ globalThis.titan_intercept_messages = function (chat, contextSize) {
         const ctx = getContext();
         const IGNORE = ctx.symbols.ignore; 
 
-        // Iterate the chat array passed by the interceptor
         for (let i = 0; i < chat.length; i++) {
-            // If this message index is older than our limit
             if (i < pruneLimit) {
-                // Set the ignore symbol
                 if (!chat[i][IGNORE]) chat[i][IGNORE] = true;
             }
         }
     }
 };
 
-// --- Summarizer ---
+// --- Summarizer (Fixed API Call) ---
 async function runSummarization() {
     if (isProcessing) return;
     const ctx = getContext();
@@ -157,9 +144,7 @@ async function runSummarization() {
     const chat = ctx.chat;
     const lastIndex = meta.last_index || 0;
     
-    if (lastIndex >= chat.length) {
-        return;
-    }
+    if (lastIndex >= chat.length) return;
 
     isProcessing = true;
     renderVisuals();
@@ -173,12 +158,19 @@ async function runSummarization() {
         promptText = promptText.replace('{{EXISTING}}', existingMemory);
         promptText = promptText.replace('{{NEW_LINES}}', newLines);
 
-        // Uses Qvink's generateRaw method - Universal Compatibility
-        const result = await generateRaw(promptText, {
+        // FIX: Construct a proper Chat Array for OpenAI compatibility
+        const messages = [
+            { role: 'system', content: 'You are a helpful assistant that summarizes stories.' },
+            { role: 'user', content: promptText }
+        ];
+
+        // FIX: Pass object to generateRaw (Qvink Method)
+        const result = await generateRaw({
+            prompt: messages, // Passing array instead of string
             max_length: 600,
-            stop: ["INSTRUCTION:", "RECENT CONVERSATION:", "UPDATED MEMORY:"],
             temperature: 0.5,
-            skip_w_info: true
+            skip_w_info: true,
+            include_jailbreak: false
         });
 
         if (!result) throw new Error("API returned empty text");
@@ -191,7 +183,7 @@ async function runSummarization() {
         });
 
         updateUI();
-        refreshMemoryInjection(); // Push to context immediately
+        refreshMemoryInjection();
         
     } catch (e) {
         err(e);
@@ -212,7 +204,6 @@ function onNewMessage() {
     const lastIndex = meta.last_index || 0;
     const currentCount = ctx.chat.length;
 
-    // Trigger Check
     const diff = currentCount - lastIndex;
     if (diff >= settings.threshold) {
         runSummarization();
@@ -280,24 +271,15 @@ async function init() {
     setupUI();
 
     const ctx = getContext();
-    
-    // Main Hooks
     ctx.eventSource.on('chat:new-message', onNewMessage);
-    
-    // Ensure visuals stick when ST redraws chat
-    ctx.eventSource.on('chat_message_rendered', () => {
-        setTimeout(renderVisuals, 50);
-    });
-    
+    ctx.eventSource.on('chat_message_rendered', () => setTimeout(renderVisuals, 50));
     ctx.eventSource.on('chat_loaded', () => { 
         updateUI(); 
         refreshMemoryInjection(); 
         setTimeout(renderVisuals, 500); 
     });
 
-    // REMOVED: ctx.contextProcessors.push(...) - This was causing the crash
-    
-    log('Titan Memory v5 (Fixed) Loaded.');
+    log('Titan Memory v6 (API Fix) Loaded.');
 }
 
 init();

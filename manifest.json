@@ -1,8 +1,8 @@
 {
   "name": "Titan Memory",
-  "version": "4.0.0",
+  "version": "7.0.0",
   "author": "LazyCodingKing",
-  "description": "Legacy-compatible memory manager based on Qvink architecture.",
+  "description": "Native memory manager. Uses SillyTavern's internal generation engine.",
   "js": "index.js",
   "css": ["style.css"],
   "html": "settings.html",

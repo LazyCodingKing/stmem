@@ -1,115 +1,89 @@
 <div id="titan-memory-settings">
-    <!-- Header -->
     <div class="inline-drawer">
         <div class="inline-drawer-toggle inline-drawer-header">
-            <b>Titan Memory Configuration</b>
+            <b>Titan Memory: Librarian Edition</b>
             <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
         </div>
         <div class="inline-drawer-content">
             
-            <!-- Main Toggles -->
             <div class="flex-container align-items-center justify-content-space-between">
-                <label data-i18n="Enabled">Enabled</label>
+                <label data-i18n="Enabled">Enable Extension</label>
                 <input type="checkbox" id="titan-enabled" />
             </div>
             <div class="flex-container align-items-center justify-content-space-between">
-                <label data-i18n="Debug Mode">Debug Mode</label>
+                <label data-i18n="Debug Mode">Debug Mode (Console Logs)</label>
                 <input type="checkbox" id="titan-debug" />
             </div>
-            <div class="flex-container align-items-center justify-content-space-between">
-                <label>Show "Success" Popups</label>
-                <input type="checkbox" id="titan-show-toasts" />
-            </div>
 
             <hr>
 
-            <!-- Aggressive Pruning Section -->
-            <h3>🛑 Aggressive Pruning</h3>
-            <div class="flex-container align-items-center justify-content-space-between">
-                <label title="If enabled, messages are hidden to keep history under a strict token limit.">Enable Token Budgeting</label>
-                <input type="checkbox" id="titan-pruning" />
-            </div>
-            <div class="flex-container align-items-center justify-content-space-between">
-                <label title="Max tokens to keep in chat history (excluding summary). Older messages are pruned.">Target Context Budget (Tokens)</label>
-                <input type="number" id="titan-token-budget" class="text_pole" min="100" max="10000" placeholder="1000" />
+            <h3>統 Librarian (Entity Splitter)</h3>
+            <div class="text_msg_hint" style="margin-bottom: 10px; font-size: 0.8em; opacity: 0.8;">
+                The Librarian analyzes conversation and automatically updates specific Lorebook entries (Characters, Places) instead of writing one long summary.
             </div>
 
-            <hr>
-
-            <!-- Summarization Settings -->
-            <h3>📝 Summarization</h3>
             <div class="flex-container align-items-center justify-content-space-between">
-                <label>Auto-Summarize</label>
+                <label title="Automatically run the Librarian analysis every X messages.">Auto-Analyze</label>
                 <input type="checkbox" id="titan-auto-summarize" />
             </div>
             <div class="flex-container align-items-center justify-content-space-between">
-                <label title="Number of new messages before triggering summary.">Message Threshold</label>
-                <input type="number" id="titan-threshold" class="text_pole" min="1" max="20" />
+                <label title="How many new messages to wait before running the analysis again.">Update Frequency (Messages)</label>
+                <input type="number" id="titan-threshold" class="text_pole" min="1" max="100" placeholder="20" />
             </div>
              <div class="flex-container align-items-center justify-content-space-between">
-                <label title="Max length of the generated summary (Characters).">Max Summary Length</label>
-                <input type="number" id="titan-max-length" class="text_pole" min="100" max="5000" />
+                <label title="Ensures generated updates are saved to the World Info (Lorebook). Keep this ON for Librarian mode.">Sync to Lorebook</label>
+                <input type="checkbox" id="titan-lorebook-sync" checked />
             </div>
 
             <hr>
 
-            <!-- Lorebook Integration -->
-            <h3>📖 Lorebook Sync</h3>
+            <h3>尅 Token Budget & Pruning</h3>
             <div class="flex-container align-items-center justify-content-space-between">
-                <label title="Automatically save the summary to a Lorebook entry with dynamic keywords.">Sync Summary to Lorebook</label>
-                <input type="checkbox" id="titan-lorebook-sync" />
+                <label title="Hides old messages to keep the chat size small. Essential for long RPs.">Enable Smart Pruning</label>
+                <input type="checkbox" id="titan-pruning" />
             </div>
             <div class="flex-container align-items-center justify-content-space-between">
-                <label title="Inject the summary into the prompt normally (Extension Prompt). Disable this if using Lorebook Sync to save tokens!">Inject Summary in Prompt</label>
-                <input type="checkbox" id="titan-inject-prompt" />
+                <label title="Max tokens allowed for Context. The extension will prune messages to keep the total (History + Memory) under this limit.">Total Token Budget</label>
+                <input type="number" id="titan-token-budget" class="text_pole" min="500" max="100000" placeholder="1000" />
             </div>
 
             <hr>
 
-            <!-- RAG / Vector Memory -->
-            <h3>🧠 Vector Memory (RAG)</h3>
+            <h3>ｧ Deep Storage (RAG)</h3>
+            <div class="text_msg_hint" style="margin-bottom: 10px; font-size: 0.8em; opacity: 0.8;">
+                "Brain Button" clicks are always saved here. Enable this to also auto-save old pruned messages.
+            </div>
             <div class="flex-container align-items-center justify-content-space-between">
                 <label title="Turn old messages into vectors and retrieve them when relevant.">Enable Vector Recall</label>
                 <input type="checkbox" id="titan-rag-enabled" />
             </div>
             
             <div class="flex-container align-items-center justify-content-space-between">
-                <label>Embedding API URL</label>
-                <input type="text" id="titan-rag-url" class="text_pole" placeholder="https://api.openai.com/v1/embeddings" />
-            </div>
-            <div class="flex-container align-items-center justify-content-space-between">
-                <label>Embedding API Key</label>
-                <input type="password" id="titan-rag-key" class="text_pole" placeholder="sk-..." />
-            </div>
-            <div class="flex-container align-items-center justify-content-space-between">
-                <label title="How many past memories to retrieve per generation.">Retrieval Depth</label>
-                <input type="number" id="titan-rag-depth" class="text_pole" min="1" max="10" placeholder="3" />
+                <label>Embedding API Key (OpenAI)</label>
+                <input type="password" id="titan-rag-key" class="text_pole" placeholder="Leave empty if using Global Settings" />
             </div>
 
             <hr>
 
-            <!-- Controls -->
             <div class="flex-container justify-content-center">
-                 <button id="titan-view-history" class="menu_button">
-                    <i class="fa-solid fa-clock-rotate-left"></i> View History
+                <button id="titan-save" class="menu_button" title="Save changes">
+                    <i class="fa-solid fa-save"></i> Save Settings
                 </button>
-                <button id="titan-save" class="menu_button" title="Save changes manually">
-                    <i class="fa-solid fa-save"></i> Save
+                <button id="titan-now" class="menu_button" title="Force the Librarian to analyze the chat NOW.">
+                    <i class="fa-solid fa-bolt"></i> Run Analysis
                 </button>
-                <button id="titan-now" class="menu_button" title="Force Summarize Now">
-                    <i class="fa-solid fa-bolt"></i> Run Now
-                </button>
-                <button id="titan-wipe" class="menu_button red_button" title="Wipe Memory">
-                    <i class="fa-solid fa-trash"></i> Wipe
+                <button id="titan-wipe" class="menu_button red_button" title="Wipe all memory indexes (Dangerous)">
+                    <i class="fa-solid fa-trash"></i> Wipe Memory
                 </button>
             </div>
             
-            <!-- Prompt Template -->
-            <div style="margin-top: 10px;">
-                <label>Summary Prompt Template</label>
-                <textarea id="titan-prompt-template" class="text_pole" rows="6"></textarea>
-                <button id="titan-reset-prompt" class="menu_button">Reset Prompt</button>
-            </div>
+            <div style="margin-top: 15px;">
+                <label><strong>Librarian Prompt Template</strong></label>
+                <div class="text_msg_hint" style="font-size: 0.8em; margin-bottom: 5px;">
+                    <b>Warning:</b> Must maintain the <code>ENTRY:</code> and <code>KEYWORDS:</code> format for the splitter to work.
+                </div>
+                <textarea id="titan-prompt-template" class="text_pole" rows="8"></textarea>
+                </div>
 
         </div>
     </div>

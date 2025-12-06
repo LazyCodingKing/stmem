@@ -1,15 +1,17 @@
-/* Titan Memory Stylesheet */
+/* --- Titan Memory: Librarian Edition Stylesheet --- */
 
+/* 1. Settings Panel Container */
 #titan-memory-settings {
     padding: 5px;
-    color: var(--SmartThemeBodyColor); /* Matches SillyTavern theme */
+    color: var(--SmartThemeBodyColor); /* Adapt to User's Theme */
+    font-family: inherit;
 }
 
-/* Flex Containers for Row Layout */
+/* 2. Flex Layouts for Rows */
 #titan-memory-settings .flex-container {
     display: flex;
-    align-items: center; /* Vertically center */
-    justify-content: space-between; /* Push label to left, input to right */
+    align-items: center;
+    justify-content: space-between;
     margin-bottom: 8px;
     flex-wrap: wrap;
     gap: 10px;
@@ -19,16 +21,26 @@
     justify-content: center;
 }
 
-/* Headers and Drawers */
+/* 3. Headers and Dividers */
 #titan-memory-settings h3 {
-    margin-top: 15px;
+    margin-top: 20px;
     margin-bottom: 10px;
     border-bottom: 1px solid var(--SmartThemeBorderColor);
     padding-bottom: 5px;
     font-size: 1.1em;
+    font-weight: bold;
     opacity: 0.9;
+    color: var(--SmartThemeQuoteColor); /* Distinct accent color */
 }
 
+#titan-memory-settings hr {
+    border: 0;
+    border-top: 1px solid var(--SmartThemeBorderColor);
+    margin: 15px 0;
+    opacity: 0.5;
+}
+
+/* 4. The "Drawer" Header */
 #titan-memory-settings .inline-drawer-header {
     background-color: var(--SmartThemeQuoteColor);
     padding: 10px;
@@ -39,39 +51,42 @@
     align-items: center;
     margin-bottom: 10px;
     font-weight: bold;
+    transition: filter 0.2s;
 }
 
 #titan-memory-settings .inline-drawer-header:hover {
     filter: brightness(1.1);
 }
 
-#titan-memory-settings .inline-drawer-content {
-    padding: 0 5px;
-    /* Default to visible, or use JS to toggle display:none */
-}
-
-/* Inputs */
+/* 5. Inputs (Text & Numbers) */
 #titan-memory-settings input[type="number"],
 #titan-memory-settings input[type="text"],
 #titan-memory-settings input[type="password"] {
     width: 100%;
-    max-width: 150px; /* Keep text inputs from stretching too wide */
-    text-align: right;
+    max-width: 120px;
+    text-align: center;
+    background-color: var(--SmartThemeInputColor);
+    color: var(--SmartThemeBodyColor);
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: 4px;
+    padding: 5px;
 }
 
+/* 6. Textarea (Prompt Template) */
 #titan-memory-settings textarea {
     width: 100%;
     resize: vertical;
-    font-family: monospace;
-    font-size: 0.9em;
+    font-family: 'Consolas', 'Monaco', monospace; /* Monospace for code editing */
+    font-size: 0.85em;
     background-color: var(--SmartThemeInputColor);
     color: var(--SmartThemeBodyColor);
     border: 1px solid var(--SmartThemeBorderColor);
     border-radius: 5px;
-    padding: 5px;
+    padding: 8px;
+    min-height: 150px;
 }
 
-/* Buttons */
+/* 7. Buttons (Save, Run, Wipe) */
 #titan-memory-settings .menu_button {
     margin: 5px;
     padding: 8px 15px;
@@ -81,10 +96,16 @@
     border-radius: 5px;
     color: var(--SmartThemeBodyColor);
     transition: all 0.2s;
+    font-weight: bold;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px; /* Space between icon and text */
 }
 
 #titan-memory-settings .menu_button:hover {
     background-color: var(--SmartThemeQuoteColor);
+    transform: translateY(-1px);
+    box-shadow: 0 2px 5px rgba(0,0,0,0.2);
 }
 
 #titan-memory-settings .red_button {
@@ -93,11 +114,50 @@
 }
 
 #titan-memory-settings .red_button:hover {
-    background-color: rgba(255, 107, 107, 0.2);
+    background-color: rgba(255, 107, 107, 0.15);
+    color: #ff8787;
 }
 
-/* Toggle Switch alignment */
+/* 8. Labels and Hints */
 #titan-memory-settings label {
-    flex: 1; /* Label takes up available space */
+    flex: 1;
     margin-right: 10px;
+    cursor: help; /* Suggests hovering for tooltip */
+}
+
+#titan-memory-settings .text_msg_hint {
+    color: var(--SmartThemeBodyColor);
+    opacity: 0.7;
+    font-style: italic;
+    margin-top: -5px;
+    margin-bottom: 10px;
+}
+
+/* --- NEW: CHAT INJECTION STYLES (The Brain Button) --- */
+
+.titan-memory-btn {
+    /* Positioning matches the timestamp/name area */
+    display: inline-block;
+    cursor: pointer;
+    margin-left: 8px;
+    margin-right: 2px;
+    opacity: 0.4;
+    transition: all 0.2s ease-in-out;
+    color: var(--SmartThemeBodyColor);
+    font-size: 1em;
+    vertical-align: middle;
+}
+
+.titan-memory-btn:hover {
+    opacity: 1;
+    transform: scale(1.15); /* Slight pop effect */
+    color: var(--SmartThemeQuoteColor); /* Highlight color */
+    text-shadow: 0 0 5px var(--SmartThemeQuoteColor);
+}
+
+/* When the button is working (Spinning) */
+.titan-memory-btn.fa-spin {
+    opacity: 1;
+    color: #00ff00; /* Hardcoded Green for "Active/Success" visibility */
+    cursor: wait;
 }

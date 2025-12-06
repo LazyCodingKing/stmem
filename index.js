@@ -1,176 +1,297 @@
 import { getContext, extension_settings, saveMetadataDebounced } from '../../../extensions.js';
 import { saveSettingsDebounced } from '../../../../script.js';
 
-const MODULE_NAME = 'memory-summarize';
+const MODULE = 'titan-memory';
 
-const default_settings = {
-  enabled: true,
-  auto_summarize: true,
-  summary_length: 'medium',
-  max_history: 50,
-  update_interval: 5,
-  api_endpoint: 'http://127.0.0.1:5000/api/v1/generate',
-  api_key: '',
-  debug: false,
+// --- Defaults ---
+const DEFAULT_PROMPT = `You are a helpful AI assistant managing the long-term memory of a story.
+Your job is to update the existing summary with new events.
+
+EXISTING MEMORY:
+"{{EXISTING}}"
+
+NEW CONVERSATION:
+{{NEW_LINES}}
+
+INSTRUCTION:
+Write a consolidated summary in the past tense. 
+Merge the new conversation into the existing memory.
+Keep it concise. Do not lose key details (names, locations, major plot points).
+Do not output anything else, just the summary text.
+
+UPDATED MEMORY:`;
+
+const defaults = {
+    enabled: true,
+    api_url: 'http://127.0.0.1:5000/api/v1/generate',
+    api_key: '',
+    threshold: 20, // messages
+    pruning_enabled: true,
+    pruning_buffer: 4, // Keep this many messages visible even if summarized, for continuity
+    prompt_template: DEFAULT_PROMPT,
+    debug: false
 };
 
 let settings = {};
-let memory_buffer = [];
+let isProcessing = false;
 
-// --- Logging ---
-function log(message) { console.log(`[${MODULE_NAME}]`, message); }
-function debug(message, ...args) { if (settings.debug) { console.log(`[${MODULE_NAME} DEBUG]`, message, ...args); } }
-function error(message) { console.error(`[${MODULE_NAME}]`, message); }
-
-// --- UI Update Functions ---
-function update_status(message, isError = false) {
-  const statusEl = $('#ms-status-text');
-  statusEl.text(message);
-  statusEl.closest('.status-display').toggleClass('error', isError);
-}
-
-function update_display() {
-  const context = getContext();
-  if (!context || !context.character) return;
-  
-  const metadata = context.character.metadata?.[MODULE_NAME] || {};
-  $('#ms-buffer-count').text(`${memory_buffer.length} messages`);
-  
-  if (metadata.last_summary_time) {
-    $('#ms-last-summary').text(new Date(metadata.last_summary_time).toLocaleTimeString());
-  } else {
-    $('#ms-last-summary').text('Never');
-  }
-}
-
-// --- Core Logic ---
-function save_settings() {
-  extension_settings[MODULE_NAME] = settings;
-  saveSettingsDebounced();
-}
-
-async function summarize_memory() {
-  if (memory_buffer.length === 0) {
-    log('No content in buffer to summarize.');
-    return;
-  }
-  if (!settings.api_endpoint) {
-    update_status('API Endpoint is not configured.', true);
-    return error('Cannot summarize: API endpoint is missing.');
-  }
-
-  update_status('Summarizing...');
-  debug(`Summarizing ${memory_buffer.length} messages.`);
-
-  const conversation = memory_buffer.map(msg => `${msg.speaker}: ${msg.text}`).join('\n');
-  const length_map = { short: 'around 100 words', medium: 'around 200 words', long: 'around 300 words' };
-  const prompt = `Human: Summarize the following conversation in the third person. The summary should be a concise narrative, capturing the key events, character actions, and emotional tone. The summary should be ${length_map[settings.summary_length]}.\n\nCONVERSATION:\n${conversation}\n\nAssistant: Here is a summary of the conversation:\n`;
-
-  try {
-    const response = await fetch(settings.api_endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': settings.api_key ? `Bearer ${settings.api_key}` : undefined },
-      body: JSON.stringify({ prompt, max_new_tokens: 400, temperature: 0.7, top_p: 0.9, stop: ['Human:', 'Assistant:'] }),
-    });
-
-    if (!response.ok) throw new Error(`API request failed with status ${response.status}`);
-    const data = await response.json();
-    const summary = data.results?.[0]?.text?.trim();
-    if (!summary) throw new Error('API response did not contain a valid summary.');
-
-    const context = getContext();
-    if (!context.character.metadata[MODULE_NAME]) context.character.metadata[MODULE_NAME] = {};
-    context.character.metadata[MODULE_NAME].summary = summary;
-    context.character.metadata[MODULE_NAME].last_summary_time = Date.now();
+// --- Helpers ---
+const log = (msg) => console.log(`[Titan] ${msg}`);
+const err = (msg) => console.error(`[Titan] ${msg}`);
+const getMeta = () => {
+    const ctx = getContext();
+    if (!ctx.character) return {};
+    return ctx.character.metadata[MODULE] || {};
+};
+const setMeta = (data) => {
+    const ctx = getContext();
+    if (!ctx.character) return;
+    if (!ctx.character.metadata[MODULE]) ctx.character.metadata[MODULE] = {};
+    Object.assign(ctx.character.metadata[MODULE], data);
     saveMetadataDebounced();
+};
 
-    log('Summary generated and saved to character metadata.');
-    debug('Summary:', summary);
-    update_status('Summary complete!');
-    memory_buffer = [];
-    update_display();
-  } catch (err) {
-    error(`Summarization failed: ${err.message}`);
-    update_status(`Error: ${err.message}`, true);
-  }
+// --- UI Updates ---
+function updateUI() {
+    const meta = getMeta();
+    $('#titan-memory-text').val(meta.summary || '');
+    
+    // Stats in status bar
+    const ctx = getContext();
+    if (ctx.character) {
+        const lastIndex = meta.last_index || 0;
+        const count = ctx.chat.length;
+        const pending = Math.max(0, count - lastIndex);
+        $('#titan-status').text(`Status: Ready. ${pending} new messages pending summary.`);
+    }
 }
+
+// --- The Core: Summarizer ---
+async function runSummarization() {
+    if (isProcessing) return;
+    const ctx = getContext();
+    if (!ctx.character) return;
+
+    const meta = getMeta();
+    const chat = ctx.chat;
+    const lastIndex = meta.last_index || 0;
+    
+    // Validation
+    if (lastIndex >= chat.length) {
+        $('#titan-status').text("No new messages to summarize.");
+        return;
+    }
+
+    isProcessing = true;
+    $('#titan-now').prop('disabled', true).text('Working...');
+    $('#titan-status').text('Generating summary... please wait.');
+
+    try {
+        // 1. Gather Data
+        const newLines = chat.slice(lastIndex).map(m => `${m.name}: ${m.mes}`).join('\n');
+        const existingMemory = meta.summary || "No history yet.";
+        
+        // 2. Prepare Prompt
+        let prompt = settings.prompt_template;
+        prompt = prompt.replace('{{EXISTING}}', existingMemory);
+        prompt = prompt.replace('{{NEW_LINES}}', newLines);
+
+        // 3. Call API
+        const response = await fetch(settings.api_url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': settings.api_key ? `Bearer ${settings.api_key}` : undefined
+            },
+            body: JSON.stringify({
+                prompt: prompt,
+                max_new_tokens: 600,
+                temperature: 0.7,
+                top_p: 0.9,
+                stop: ["INSTRUCTION:", "NEW CONVERSATION:"]
+            })
+        });
+
+        if (!response.ok) throw new Error(`API returned ${response.status}`);
+        const data = await response.json();
+        
+        // Handle different API output formats (Ooba/Kobold/OpenAI)
+        let result = data.results?.[0]?.text || data.choices?.[0]?.text || data.choices?.[0]?.message?.content || "";
+        result = result.trim();
+
+        if (!result) throw new Error("Empty response from API");
+
+        // 4. Save
+        setMeta({
+            summary: result,
+            last_index: chat.length
+        });
+
+        $('#titan-status').text('Summary updated successfully!');
+        updateUI();
+
+    } catch (e) {
+        err(e);
+        $('#titan-status').text(`Error: ${e.message}`).addClass('error');
+    } finally {
+        isProcessing = false;
+        $('#titan-now').prop('disabled', false).text('⚡ Summarize Now');
+    }
+}
+
+// --- Context Processor: Token Reduction & Injection ---
+// This runs before every generation to modify what the AI sees
+const titanProcessor = (data) => {
+    if (!settings.enabled) return;
+    const meta = getMeta();
+    if (!meta.summary) return;
+
+    // 1. INJECT MEMORY
+    // We add a high-priority system message with the summary
+    const summaryMsg = {
+        is_system: true,
+        mes: `[Story Summary / Long Term Memory]:\n${meta.summary}`,
+        send_as: 'system',
+        force_avatar: 'system' // Helper for some UIs
+    };
+    // Insert at index 0 (top of context)
+    data.chat.unshift(summaryMsg);
+
+
+    // 2. PRUNE OLD MESSAGES (Token Saving)
+    if (settings.pruning_enabled && meta.last_index) {
+        const buffer = settings.pruning_buffer || 4;
+        
+        // meta.last_index is the index in the REAL chat array (ctx.chat)
+        // data.chat is the array being prepared for the AI (which we just unshifted)
+        
+        // We need to mark messages as "hidden" in the real context if we want to save tokens.
+        // However, ContextProcessors receive a copy. Modifying 'data.chat' only affects this request.
+        
+        // Logic: We want to remove messages from `data.chat` that represent 
+        // the history already covered by the summary, EXCEPT the last 'buffer' messages.
+        
+        // We can't rely on indices matching perfectly because `data.chat` might contain 
+        // World Info injections or other extension data.
+        
+        // Reliable method: Iterate the chat provided by ST and filter based on content hash? Too slow.
+        // Best approximation: Remove N messages from the start of the user/character conversation.
+        
+        // Let's use the `onMessageReceived` hook to permanently mark messages as ignored 
+        // in the main array, which is safer and cleaner for ST.
+    }
+};
 
 // --- Event Handlers ---
-function onNewMessage(data) {
-  if (!settings.enabled || !data.mes || data.is_system) return;
-  memory_buffer.push({ timestamp: Date.now(), text: data.mes, speaker: data.name || 'Unknown' });
-  update_display();
 
-  if (settings.auto_summarize && memory_buffer.length >= settings.max_history) {
-    const metadata = getContext().character.metadata?.[MODULE_NAME] || {};
-    const lastTime = metadata.last_summary_time || 0;
-    if ((Date.now() - lastTime) / 60000 >= settings.update_interval) {
-      log('Auto-summarize triggered by buffer size and interval.');
-      summarize_memory();
+// Checks if we should summarize or prune
+function onNewMessage() {
+    if (!settings.enabled) return;
+    const ctx = getContext();
+    const meta = getMeta();
+    const lastIndex = meta.last_index || 0;
+    const currentCount = ctx.chat.length;
+
+    // 1. Check Pruning (Token Reduction)
+    if (settings.pruning_enabled && lastIndex > 0) {
+        const IGNORE = ctx.symbols.ignore; // The magic symbol that hides tokens
+        const buffer = settings.pruning_buffer || 4;
+        const pruneLimit = lastIndex - buffer; // Keep a few overlap messages
+
+        if (pruneLimit > 0) {
+            let pruned = 0;
+            for (let i = 0; i < pruneLimit; i++) {
+                // If it's not already ignored, ignore it
+                if (!ctx.chat[i][IGNORE]) {
+                    ctx.chat[i][IGNORE] = true;
+                    pruned++;
+                }
+            }
+            if (pruned > 0) log(`Pruned ${pruned} messages to save tokens.`);
+        }
     }
-  }
-}
 
-function add_summary_to_context(context, text) {
-  if (!settings.enabled) return text;
-  const summary = context.character?.metadata?.[MODULE_NAME]?.summary;
-  if (summary) {
-    debug('Injecting summary into context.');
-    return `[This is a summary of the conversation so far:\n${summary}\n]\n${text}`;
-  }
-  return text;
-}
-
-// --- Setup ---
-function setup_settings_ui() {
-  const panel = $('#memory-summarize-settings');
-  panel.on('change', '#ms-enabled', function() { settings.enabled = this.checked; save_settings(); });
-  panel.on('change', '#ms-auto-summarize', function() { settings.auto_summarize = this.checked; save_settings(); });
-  panel.on('change', '#ms-length', function() { settings.summary_length = $(this).val(); save_settings(); });
-  panel.on('input', '#ms-max-history', function() { settings.max_history = Number($(this).val()); save_settings(); });
-  panel.on('input', '#ms-update-interval', function() { settings.update_interval = Number($(this).val()); save_settings(); });
-  panel.on('input', '#ms-api-endpoint', function() { settings.api_endpoint = $(this).val().trim(); save_settings(); });
-  panel.on('input', '#ms-api-key', function() { settings.api_key = $(this).val().trim(); save_settings(); });
-  panel.on('change', '#ms-debug', function() { settings.debug = this.checked; save_settings(); });
-  panel.on('click', '#ms-summarize-btn', async function() { $(this).prop('disabled', true); await summarize_memory(); $(this).prop('disabled', false); });
-  panel.on('click', '#ms-reset-btn', function() { memory_buffer = []; update_status('Memory buffer has been reset.'); update_display(); });
-
-  // Set initial values
-  panel.find('#ms-enabled').prop('checked', settings.enabled);
-  panel.find('#ms-auto-summarize').prop('checked', settings.auto_summarize);
-  panel.find('#ms-length').val(settings.summary_length);
-  panel.find('#ms-max-history').val(settings.max_history);
-  panel.find('#ms-update-interval').val(settings.update_interval);
-  panel.find('#ms-api-endpoint').val(settings.api_endpoint);
-  panel.find('#ms-api-key').val(settings.api_key);
-  panel.find('#ms-debug').prop('checked', settings.debug);
-  update_status('Ready');
-}
-
-async function setup() {
-  try {
-    const loaded_settings = extension_settings[MODULE_NAME] || {};
-    settings = { ...default_settings, ...loaded_settings };
-    const context = getContext();
+    // 2. Check Trigger
+    const diff = currentCount - lastIndex;
+    if (diff >= settings.threshold) {
+        log(`Threshold reached (${diff}/${settings.threshold}). Summarizing.`);
+        runSummarization();
+    }
     
+    updateUI();
+}
+
+function setupUI() {
+    // Toggles & Inputs
+    const bind = (id, key, type='text') => {
+        const el = $(`#${id}`);
+        if (type === 'check') {
+            el.prop('checked', settings[key]);
+            el.on('change', () => { settings[key] = el.prop('checked'); saveSettings(); });
+        } else {
+            el.val(settings[key]);
+            el.on('change', () => { settings[key] = (type==='num' ? Number(el.val()) : el.val()); saveSettings(); });
+        }
+    };
+
+    bind('titan-enabled', 'enabled', 'check');
+    bind('titan-pruning', 'pruning_enabled', 'check');
+    bind('titan-api', 'api_url');
+    bind('titan-key', 'api_key');
+    bind('titan-threshold', 'threshold', 'num');
+    bind('titan-prompt-template', 'prompt_template');
+
+    // Buttons
+    $('#titan-reset-prompt').on('click', () => {
+        $('#titan-prompt-template').val(DEFAULT_PROMPT).trigger('change');
+    });
+
+    $('#titan-save').on('click', () => {
+        setMeta({ summary: $('#titan-memory-text').val() });
+        $('#titan-status').text('Memory manually updated.');
+    });
+
+    $('#titan-now').on('click', runSummarization);
+
+    $('#titan-wipe').on('click', () => {
+        if(confirm("Delete all memory for this character?")) {
+            setMeta({ summary: '', last_index: 0 });
+            // Un-hide all messages
+            const ctx = getContext();
+            const IGNORE = ctx.symbols.ignore;
+            ctx.chat.forEach(m => delete m[IGNORE]);
+            updateUI();
+            $('#titan-status').text('Memory wiped and context restored.');
+        }
+    });
+}
+
+function saveSettings() {
+    extension_settings[MODULE] = settings;
+    saveSettingsDebounced();
+}
+
+async function init() {
+    // Load Settings
+    settings = { ...defaults, ...(extension_settings[MODULE] || {}) };
+
+    // HTML
     const url = new URL(import.meta.url);
-    const settings_path = `${url.pathname.substring(0, url.pathname.lastIndexOf('/'))}/settings.html`;
-    const response = await fetch(settings_path);
-    if (!response.ok) return error(`Failed to load settings.html: ${response.status}`);
-    
-    $('#extensions_settings2').append(await response.text());
-    setup_settings_ui();
+    const path = url.pathname.substring(0, url.pathname.lastIndexOf('/'));
+    const html = await (await fetch(`${path}/settings.html`)).text();
+    $('#extensions_settings2').append(html);
 
-    context.eventSource.on('chat:new-message', onNewMessage);
-    context.eventSource.on('chat_loaded', update_display);
-    
-    // *** THE FIX: The correct method is context.contextProcessors.push ***
-    context.contextProcessors.push(add_summary_to_context);
+    setupUI();
 
-    log('Extension setup complete.');
-  } catch (err) {
-    error(`Setup failed: ${err.message}`);
-  }
+    // Hooks
+    const ctx = getContext();
+    ctx.eventSource.on('chat:new-message', onNewMessage);
+    ctx.eventSource.on('chat_loaded', () => { updateUI(); onNewMessage(); }); // Run check on load
+    
+    // Processor (Injection)
+    ctx.contextProcessors.push(titanProcessor);
+
+    log('Titan Memory v2 Loaded.');
 }
 
-setup();
+init();

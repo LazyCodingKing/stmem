@@ -1,96 +1,53 @@
-<div id="memory-summarize-settings" class="memory-summarize-content">
-  <div class="memory-summarize-panel">
-    <h3>🧠 Memory Summarize Settings</h3>
+<div class="titan-panel">
+    <h3>🛡️ Titan Memory v2</h3>
+    <div class="titan-desc">Rolling summarization with token pruning and custom prompts.</div>
 
-    <!-- Enable/Disable -->
-    <div class="settings-row">
-      <label for="ms-enabled">
-        <input type="checkbox" id="ms-enabled" class="settings-input">
-        <span>Enable Memory Summarization</span>
-      </label>
+    <!-- Toggle & API -->
+    <div class="titan-row">
+        <span>Enable Extension</span>
+        <input type="checkbox" id="titan-enabled" style="width: 18px; height: 18px;">
+    </div>
+    <div class="titan-row">
+        <span>API Endpoint</span>
+        <input type="text" id="titan-api" class="titan-input" placeholder="http://127.0.0.1:5000/api/v1/generate">
+    </div>
+     <div class="titan-row">
+        <span>API Key (Optional)</span>
+        <input type="password" id="titan-key" class="titan-input">
     </div>
 
-    <!-- Auto-Summarize -->
-    <div class="settings-row">
-      <label for="ms-auto-summarize">
-        <input type="checkbox" id="ms-auto-summarize" class="settings-input">
-        <span>Auto-Summarize Messages</span>
-      </label>
+    <!-- Thresholds -->
+    <div class="titan-section-title">Trigger & Pruning</div>
+    <div class="titan-row">
+        <span>Summarize every N messages:</span>
+        <input type="number" id="titan-threshold" class="titan-input" style="max-width: 60px;" min="5">
+    </div>
+    <div class="titan-row">
+        <span>Active Pruning (Reduce Tokens)</span>
+        <input type="checkbox" id="titan-pruning" style="width: 18px; height: 18px;">
+    </div>
+    <div class="titan-desc">
+        If checked, messages that have been summarized will be hidden from the AI to save tokens.
     </div>
 
-    <!-- Summary Length -->
-    <div class="settings-row">
-      <label for="ms-length">
-        Summary Length:
-        <select id="ms-length" class="settings-input">
-          <option value="short">Short (~100 words)</option>
-          <option value="medium" selected>Medium (~200 words)</option>
-          <option value="long">Long (~300 words)</option>
-        </select>
-      </label>
+    <!-- Prompt Editor -->
+    <div class="titan-section-title">Summary Prompt Template</div>
+    <div class="titan-desc">
+        Use <code>{{EXISTING}}</code> for current memory and <code>{{NEW_LINES}}</code> for recent chat.
+    </div>
+    <textarea id="titan-prompt-template" class="titan-textarea"></textarea>
+    <button id="titan-reset-prompt" class="titan-btn" style="margin-top:5px; width:auto; font-size:0.8em;">Reset to Default</button>
+
+    <!-- Manual Editor -->
+    <div class="titan-section-title">Current Memory State</div>
+    <textarea id="titan-memory-text" class="titan-textarea" style="min-height: 150px;"></textarea>
+    
+    <div class="titan-row" style="margin-top: 10px;">
+        <button id="titan-save" class="titan-btn">💾 Save Memory</button>
+        <button id="titan-now" class="titan-btn">⚡ Summarize Now</button>
+        <button id="titan-wipe" class="titan-btn red">🗑️ Wipe All</button>
     </div>
 
-    <!-- Max History -->
-    <div class="settings-row">
-      <label for="ms-max-history">
-        Max Messages in Buffer:
-        <input type="number" id="ms-max-history" class="settings-input" value="50" min="10" max="500">
-      </label>
-    </div>
-
-    <!-- Update Interval -->
-    <div class="settings-row">
-      <label for="ms-update-interval">
-        Auto-Summarize Interval (minutes):
-        <input type="number" id="ms-update-interval" class="settings-input" value="5" min="1" max="60">
-      </label>
-    </div>
-
-    <!-- API Endpoint -->
-    <hr>
-    <div class="settings-row">
-        <label for="ms-api-endpoint">
-            API Endpoint:
-            <input type="text" id="ms-api-endpoint" class="settings-input" placeholder="http://127.0.0.1:5000/api/v1/generate">
-        </label>
-    </div>
-
-    <!-- API Key -->
-    <div class="settings-row">
-        <label for="ms-api-key">
-            API Key (Optional):
-            <input type="text" id="ms-api-key" class="settings-input" placeholder="Your API key">
-        </label>
-    </div>
-
-    <!-- Buttons -->
-    <div class="settings-row button-row">
-      <button id="ms-summarize-btn" class="btn-primary">📝 Summarize Now</button>
-      <button id="ms-reset-btn" class="btn-danger">🔄 Reset Buffer</button>
-    </div>
-
-    <!-- Status Display -->
-    <div id="ms-status" class="status-display">
-      <strong>Status:</strong> <span id="ms-status-text">Ready</span>
-    </div>
-
-    <!-- Statistics -->
-    <div class="stats-display">
-      <div class="stat-item">
-        <strong>Buffer Size:</strong> <span id="ms-buffer-count">0</span> messages
-      </div>
-      <div class="stat-item">
-        <strong>Last Summary:</strong> <span id="ms-last-summary">Never</span>
-      </div>
-    </div>
-
-    <!-- Debug -->
-    <hr>
-    <div class="settings-row">
-      <label for="ms-debug">
-        <input type="checkbox" id="ms-debug" class="settings-input">
-        <span>Debug Mode</span>
-      </label>
-    </div>
-  </div>
+    <!-- Status -->
+    <div id="titan-status" class="titan-status">Ready.</div>
 </div>

@@ -1,134 +1,65 @@
-.memory-summarize-panel {
-  padding: 15px;
-  border-radius: 8px;
-  margin: 10px 0;
-  background: var(--bg2);
-  border: 1px solid var(--border-color);
+.titan-panel {
+    background: rgba(0, 0, 0, 0.2);
+    padding: 15px;
+    border-radius: 8px;
+    border: 1px solid var(--smart-theme-border);
+    margin-bottom: 10px;
 }
-
-.memory-summarize-panel h3 {
-  margin-top: 0;
-  margin-bottom: 15px;
-  color: var(--text-color);
+.titan-section-title {
+    font-weight: bold;
+    margin-top: 15px;
+    margin-bottom: 5px;
+    color: var(--smart-theme-text-main);
+    border-bottom: 1px solid var(--smart-theme-border);
+    padding-bottom: 2px;
 }
-
-.settings-row {
-  display: flex;
-  align-items: center;
-  margin-bottom: 12px;
-  gap: 10px;
+.titan-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+    gap: 10px;
 }
-
-.settings-row label {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  cursor: pointer;
+.titan-input {
+    background: var(--smart-theme-bg);
+    color: var(--smart-theme-text-main);
+    border: 1px solid var(--smart-theme-border);
+    padding: 5px;
+    border-radius: 4px;
+    flex-grow: 1;
 }
-
-.settings-row input[type="checkbox"],
-.settings-row input[type="number"],
-.settings-row input[type="text"],
-.settings-row select {
-  padding: 5px 8px;
-  border: 1px solid var(--border-color);
-  border-radius: 4px;
-  background: var(--bg1);
-  color: var(--text-color);
+.titan-textarea {
+    width: 100%;
+    min-height: 100px;
+    background: var(--smart-theme-bg);
+    color: var(--smart-theme-text-main);
+    border: 1px solid var(--smart-theme-border);
+    border-radius: 4px;
+    padding: 8px;
+    font-family: monospace;
+    font-size: 0.85rem;
+    resize: vertical;
 }
-
-.settings-row input[type="checkbox"] {
-  cursor: pointer;
-  width: 18px;
-  height: 18px;
+.titan-btn {
+    padding: 8px 12px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: bold;
+    background: var(--smart-theme-submit-bg);
+    color: var(--smart-theme-submit-text);
+    flex-grow: 1;
+    text-align: center;
 }
-
-.settings-row input[type="number"],
-.settings-row input[type="text"] {
-  width: 80px;
-  margin-left: auto;
-  flex-grow: 1;
+.titan-btn:hover { filter: brightness(1.1); }
+.titan-btn.red { background: #8b0000; color: #fff; }
+.titan-desc { font-size: 0.75rem; opacity: 0.7; margin-bottom: 5px; }
+.titan-status {
+    margin-top: 10px;
+    padding: 8px;
+    background: rgba(0, 100, 255, 0.1);
+    border-left: 3px solid var(--smart-theme-submit-bg);
+    border-radius: 4px;
+    font-size: 0.9rem;
 }
-
-.settings-row select {
-  margin-left: auto;
-  min-width: 120px;
-}
-
-.button-row {
-  display: flex;
-  gap: 10px;
-  justify-content: flex-start;
-}
-
-.btn-primary,
-.btn-danger {
-  padding: 8px 16px;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-  font-weight: bold;
-  transition: all 0.2s ease;
-}
-
-.btn-primary {
-  background: var(--primary-color);
-  color: white;
-}
-
-.btn-primary:hover:not(:disabled) {
-  filter: brightness(0.9);
-}
-
-.btn-danger {
-  background: var(--error);
-  color: white;
-}
-
-.btn-danger:hover:not(:disabled) {
-  filter: brightness(0.9);
-}
-
-.btn-primary:disabled,
-.btn-danger:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.status-display {
-  padding: 10px;
-  background: var(--bg3);
-  border-left: 4px solid var(--primary-color);
-  border-radius: 4px;
-  margin: 10px 0;
-  font-size: 14px;
-}
-
-/* Make errors more visible */
-.status-display.error {
-    border-left-color: var(--error);
-    color: var(--error);
-}
-
-.stats-display {
-  padding: 10px;
-  background: var(--bg1);
-  border-radius: 4px;
-  margin: 10px 0;
-  font-size: 13px;
-}
-
-.stat-item {
-  padding: 5px 0;
-}
-
-.stat-item strong {
-  margin-right: 8px;
-}
-
-hr {
-  border: none;
-  border-top: 1px solid var(--border-color);
-  margin: 15px 0;
-}
+.titan-status.error { background: rgba(255, 0, 0, 0.1); border-left-color: red; }

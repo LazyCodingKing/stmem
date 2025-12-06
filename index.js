@@ -66,20 +66,25 @@ function updateUI() {
     }
 }
 
-// --- Visual Injection (Fixed Placement) ---
+// --- Visual Injection (Qvink Method: By Message ID) ---
 function renderVisuals(errorMsg = null) {
     if (!settings.enabled || !settings.show_visuals) {
         $('.titan-chat-node').remove();
         return;
     }
 
+    const ctx = getContext();
     const meta = getMeta();
-    const chat = $('#chat');
-    const lastMsg = chat.children('.mes').last();
     
+    // Find the last message ID
+    const lastMsgId = ctx.chat.length - 1;
+    if (lastMsgId < 0) return;
+
+    // Find the DOM element with that mesid
+    const lastMsg = $(`#chat [mesid="${lastMsgId}"]`);
     if (lastMsg.length === 0) return;
 
-    // Remove existing nodes
+    // Remove old nodes
     $('.titan-chat-node').remove();
 
     let html = '';
@@ -96,8 +101,7 @@ function renderVisuals(errorMsg = null) {
             <div class="titan-memory-content" style="white-space: pre-wrap;">${meta.summary}</div></div>`;
     }
 
-    // FIX: Inject AFTER .mes_text, not inside it.
-    // This prevents ST's markdown renderer from wiping our box.
+    // Inject AFTER the text block (Qvink style)
     if (html) {
         const textBlock = lastMsg.find('.mes_text');
         if (textBlock.length) {
@@ -108,7 +112,7 @@ function renderVisuals(errorMsg = null) {
     }
 }
 
-// --- Injection Logic ---
+// --- Injection Logic (Qvink Method) ---
 function refreshMemoryInjection() {
     const ctx = getContext();
     const meta = getMeta();
@@ -119,6 +123,7 @@ function refreshMemoryInjection() {
     }
 
     const injectionText = `[System Note - Story Memory]:\n${meta.summary}`;
+    // extensionName, text, position, depth, scan, role
     ctx.setExtensionPrompt(`${MODULE}_injection`, injectionText, 0, 0, true, 0);
 }
 
@@ -143,7 +148,7 @@ globalThis.titan_intercept_messages = function (chat, contextSize) {
     }
 };
 
-// --- Summarizer ---
+// --- Summarizer (Fixed API Call) ---
 async function runSummarization() {
     if (isProcessing) return;
     const ctx = getContext();
@@ -158,7 +163,6 @@ async function runSummarization() {
     isProcessing = true;
     renderVisuals();
     $('#titan-status').text('Generating summary...');
-    log("Starting generation...");
 
     try {
         const newLines = chat.slice(lastIndex).map(m => `${m.name}: ${m.mes}`).join('\n');
@@ -168,8 +172,16 @@ async function runSummarization() {
         promptText = promptText.replace('{{EXISTING}}', existingMemory);
         promptText = promptText.replace('{{NEW_LINES}}', newLines);
 
-        // FIX: Send String, not Array. Safer for all APIs.
-        const result = await generateRaw(promptText, {
+        // Construct Chat Array for compatibility
+        const messages = [
+            { role: 'system', content: 'You are a helpful assistant.' },
+            { role: 'user', content: promptText }
+        ];
+
+        // --- THE FIX: Pass a SINGLE OBJECT to generateRaw ---
+        // This matches Qvink's implementation exactly.
+        const result = await generateRaw({
+            prompt: messages, 
             max_length: 600,
             stop: ["INSTRUCTION:", "RECENT CONVERSATION:", "UPDATED MEMORY:"],
             temperature: 0.5,
@@ -180,7 +192,6 @@ async function runSummarization() {
         if (!result) throw new Error("API returned empty text");
 
         let cleanResult = result.trim();
-        log("Generation successful.");
 
         setMeta({
             summary: cleanResult,
@@ -269,7 +280,7 @@ function saveSettings() {
 
 // --- MAIN ENTRY POINT ---
 jQuery(async function () {
-    log('Initializing Titan Memory v11...');
+    log('Initializing Titan Memory v12...');
 
     settings = { ...defaults, ...(extension_settings[MODULE] || {}) };
 
@@ -286,7 +297,7 @@ jQuery(async function () {
     const ctx = getContext();
     const event_types = ctx.event_types;
 
-    // Listeners
+    // Listeners using System Types (Qvink Style)
     ctx.eventSource.on(event_types.USER_MESSAGE_RENDERED, () => {
         log("User message rendered");
         onNewMessage();
@@ -311,5 +322,5 @@ jQuery(async function () {
         setTimeout(renderVisuals, 1000);
     }
 
-    log('Titan Memory v11 Ready.');
+    log('Titan Memory v12 (Qvink API Match) Loaded.');
 });

@@ -367,11 +367,20 @@ async function run_summarization() {
         }
 
         debug(`Generating summary for ${newMessages.length} new messages`);
+        log(`Prompt length: ${promptText.length} characters`);
 
-        const result = await generateRaw({
-            prompt: apiPrompt,
-            trimNames: false,
-        });
+        // Add timeout to prevent hanging
+        const timeoutPromise = new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('API call timeout (30s)')), 30000)
+        );
+
+        const result = await Promise.race([
+            generateRaw({
+                prompt: apiPrompt,
+                trimNames: false,
+            }),
+            timeoutPromise
+        ]);
 
         if (!result || typeof result !== 'string') {
             throw new Error("API returned invalid response");

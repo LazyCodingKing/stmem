@@ -1,190 +1,342 @@
-// ============================================================================
-// IMPORTS
-// ============================================================================
-import {
-    saveSettingsDebounced,
-    generateRaw,
-    getRequestHeaders,
-} from '../../../../script.js';
+import { Summarizer } from './summarizer.js';
+import { MemoryAPI } from './api.js';
+import { Logger, validateConfig } from './utils.js';
 
-import {
-    extension_settings,
-    loadExtensionSettings,
-} from '../../../extensions.js';
+/**
+ * Memory Summarize Plugin for SillyTavern
+ * Intelligently summarizes and manages character memory
+ */
+class MemorySummarizePlugin {
+  constructor() {
+    this.logger = new Logger('MemorySummarize');
+    this.config = {
+      enabled: true,
+      autoSummarize: true,
+      summaryLength: 'medium',
+      updateInterval: 300000, // 5 minutes
+      maxHistoryLines: 50,
+      apiEndpoint: null,
+      apiKey: null,
+    };
+    this.summarizer = null;
+    this.api = null;
+    this.memoryBuffer = [];
+    this.lastSummaryTime = 0;
+    this.isInitialized = false;
+  }
 
-// ============================================================================
-// SETUP
-// ============================================================================
-const context = SillyTavern.getContext();
-const eventSource = context.eventSource;
-const event_types = context.event_types;
-const renderExtensionTemplateAsync = context.renderExtensionTemplateAsync;
-
-const extensionName = 'memory-summarize';
-const extensionPath = 'third-party/memory-summarize';
-
-// Clean Defaults (Matching HTML IDs now!)
-const defaultSettings = {
-    auto_summarize: true,
-    message_threshold: 20,    // "Update Frequency"
-    max_summary_words: 350,   // "Max Summary Words"
-    master_summary: "",
-    debugMode: false
-};
-
-// ============================================================================
-// HELPER: CLEANER
-// ============================================================================
-function cleanTextForSummary(text) {
-    if (!text) return "";
-    text = text.replace(/User's Stats[\s\S]*?(?=\n\n|$)/g, "");
-    text = text.replace(/Info Box[\s\S]*?(?=\n\n|$)/g, "");
-    text = text.replace(/Present Characters[\s\S]*?(?=\n\n|$)/g, "");
-    text = text.replace(/```\w*\n?/g, "").replace(/```/g, "");
-    text = text.replace(/<[^>]*>/g, " ");
-    text = text.replace(/\s+/g, " ").trim();
-    return text;
-}
-
-// ============================================================================
-// CORE LOGIC
-// ============================================================================
-// ============================================================================
-// CORE LOGIC: NARRATIVE MODE (Bypasses Safety Filters)
-// ============================================================================
-async function triggerRollingSummarize() {
-    const chat = context.chat;
-    const threshold = extension_settings[extensionName].message_threshold || 20;
-    const maxWords = extension_settings[extensionName].max_summary_words || 350;
-
-    if (!chat || chat.length < threshold) return;
-
-    // Grab recent messages
-    const recentMessages = chat.slice(-threshold);
-    
-    // We still clean the text to save tokens (stripping stats/HTML is good!)
-    let newEventsText = recentMessages.map(msg => `${msg.name}: ${cleanTextForSummary(msg.mes)}`).join('\n');
-
-    if (newEventsText.length < 50) return;
-
-    let currentMemory = extension_settings[extensionName].master_summary || "The story begins.";
-
-    // THE FIX: Frame it as a "Story Recap" not a "System Log"
-    // This tricks Google into seeing it as creative writing (Allowed) vs. factual reporting (Blocked)
-    const prompt = `
-    Write a concise narrative recap of the story so far.
-    
-    [Previous Story]:
-    ${currentMemory}
-
-    [Recent Events]:
-    ${newEventsText}
-
-    [Instruction]:
-    Combine the Previous Story and Recent Events into a single fluid paragraph.
-    Focus on the plot actions, character decisions, and key turning points.
-    Write in a storytelling style (e.g., "The protagonist entered the room...").
-    Do not use bullet points. Keep it under ${maxWords} words.
-    `;
-
-    console.log(`[${extensionName}] Generating Narrative Summary...`);
-    if(extension_settings[extensionName].debugMode) console.log(prompt);
-
+  /**
+   * Initialize the plugin
+   * @param {Object} sillytavernAPI - SillyTavern API
+   */
+  async init(sillytavernAPI) {
     try {
-        // Higher temperature (0.7) makes it feel more "creative" to the filter
-        const newSummary = await generateRaw(prompt, { max_length: 500, temperature: 0.7 });
+      this.logger.log('Initializing Memory Summarize Plugin...');
 
-        if (newSummary && newSummary.length > 10) {
-            extension_settings[extensionName].master_summary = newSummary.trim();
-            saveSettingsDebounced();
-            console.log(`[${extensionName}] Memory Updated!`);
-            toastr.success("Memory Updated", "Narrative Summary");
-        }
-    } catch (e) {
-        console.error(`[${extensionName}] Summarization Failed:`, e);
-        toastr.error("Summary Blocked (Try 'Block None' in Settings)", "Google Error");
+      // Validate SillyTavern API
+      if (!sillytavernAPI) {
+        throw new Error('SillyTavern API not provided');
+      }
+
+      // Initialize submodules
+      this.summarizer = new Summarizer(this.config);
+      this.api = new MemoryAPI(this.config);
+
+      // Load saved configuration
+      await this.loadConfig();
+
+      // Register event listeners
+      this.registerEventListeners(sillytavernAPI);
+
+      // Create UI elements
+      this.createUI();
+
+      this.isInitialized = true;
+      this.logger.log('Plugin initialized successfully');
+
+      return true;
+    } catch (error) {
+      this.logger.error('Initialization failed:', error);
+      return false;
     }
-}
-// ============================================================================
-// API BRIDGE
-// ============================================================================
-const qvink_memory_api = {
-    getSettings: async () => {
-        return extension_settings[extensionName];
-    },
-    setSettings: async (newSettings) => {
-        Object.assign(extension_settings[extensionName], newSettings);
-        saveSettingsDebounced();
-        if (newSettings.debugMode !== undefined) {
-            console.log(`[${extensionName}] Debug Mode: ${newSettings.debugMode}`);
-        }
-    },
-    refreshMemory: async () => {
-        toastr.info("Force triggering summary...", "Memory");
-        await triggerRollingSummarize();
-    },
-    getContext: () => context
-};
+  }
 
-// ============================================================================
-// INTERCEPTOR
-// ============================================================================
-function memory_intercept_messages(chat, ...args) {
-    if (!extension_settings[extensionName]?.auto_summarize) return;
-
-    const memory = extension_settings[extensionName].master_summary;
-    if (memory && memory.length > 5) {
-        const memoryBlock = {
-            name: "System",
-            is_system: true,
-            mes: `[STORY SUMMARY SO FAR: ${memory}]`,
-            force_avatar: "system.png"
-        };
-        chat.unshift(memoryBlock);
-    }
-}
-
-// ============================================================================
-// INITIALIZATION
-// ============================================================================
-jQuery(async function () {
-    console.log(`[${extensionName}] Initializing...`);
-
-    // 1. Load Settings
-    const settings = await loadExtensionSettings(extensionName);
-    if (!extension_settings[extensionName]) {
-        extension_settings[extensionName] = {};
-    }
-    Object.assign(extension_settings[extensionName], defaultSettings, settings);
-
-    // 2. EXPOSE API
-    window.qvink_memory = qvink_memory_api;
-
-    // 3. Inject HTML
+  /**
+   * Load configuration from storage
+   */
+  async loadConfig() {
     try {
-        const settingsHtml = await renderExtensionTemplateAsync(extensionPath, 'settings');
-        $('#extensions_settings').append(settingsHtml);
-    } catch (e) {
-        console.error(`[${extensionName}] Failed to load HTML:`, e);
+      // In a real implementation, load from localStorage or API
+      const savedConfig = localStorage.getItem('memorySummarize_config');
+      if (savedConfig) {
+        const parsed = JSON.parse(savedConfig);
+        this.config = { ...this.config, ...parsed };
+        this.logger.log('Configuration loaded');
+      }
+    } catch (error) {
+      this.logger.warn('Could not load saved config:', error);
     }
+  }
 
-    // 4. Listeners
-    if (eventSource) {
-        eventSource.on(event_types.MESSAGE_RECEIVED, async () => {
-            const currentContext = SillyTavern.getContext();
-            const msgCount = currentContext.chat.length;
-            
-            // USE THE NEW CLEAN VARIABLE NAME
-            const threshold = extension_settings[extensionName].message_threshold || 20;
-            
-            if (msgCount > 0 && msgCount % threshold === 0) {
-                if (extension_settings[extensionName].auto_summarize) {
-                    await triggerRollingSummarize();
-                }
-            }
+  /**
+   * Save configuration to storage
+   */
+  async saveConfig() {
+    try {
+      localStorage.setItem('memorySummarize_config', JSON.stringify(this.config));
+      this.logger.log('Configuration saved');
+    } catch (error) {
+      this.logger.error('Could not save config:', error);
+    }
+  }
+
+  /**
+   * Register event listeners
+   */
+  registerEventListeners(sillytavernAPI) {
+    try {
+      // Listen for new messages
+      if (sillytavernAPI.eventSource) {
+        sillytavernAPI.eventSource.on('message', (message) => {
+          this.onMessageReceived(message);
         });
-    }
 
-    window.memory_intercept_messages = memory_intercept_messages;
-    console.log(`[${extensionName}] Ready. Clean Refactor. 🚀`);
-});
+        sillytavernAPI.eventSource.on('character_loaded', () => {
+          this.onCharacterLoaded();
+        });
+
+        sillytavernAPI.eventSource.on('character_unloaded', () => {
+          this.onCharacterUnloaded();
+        });
+      }
+    } catch (error) {
+      this.logger.warn('Could not register event listeners:', error);
+    }
+  }
+
+  /**
+   * Handle new message
+   */
+  onMessageReceived(message) {
+    try {
+      if (!this.config.enabled) return;
+
+      // Add to memory buffer
+      if (message && message.text) {
+        this.memoryBuffer.push({
+          timestamp: Date.now(),
+          text: message.text,
+          speaker: message.name || 'Unknown',
+        });
+
+        // Check if auto-summarize should trigger
+        this.checkAutoSummarize();
+      }
+    } catch (error) {
+      this.logger.error('Error processing message:', error);
+    }
+  }
+
+  /**
+   * Handle character loaded event
+   */
+  onCharacterLoaded() {
+    try {
+      this.memoryBuffer = [];
+      this.lastSummaryTime = 0;
+      this.logger.log('Character loaded, memory buffer reset');
+    } catch (error) {
+      this.logger.error('Error on character load:', error);
+    }
+  }
+
+  /**
+   * Handle character unloaded event
+   */
+  onCharacterUnloaded() {
+    try {
+      this.memoryBuffer = [];
+      this.logger.log('Character unloaded');
+    } catch (error) {
+      this.logger.error('Error on character unload:', error);
+    }
+  }
+
+  /**
+   * Check if auto-summarize should trigger
+   */
+  checkAutoSummarize() {
+    try {
+      const now = Date.now();
+      const timeSinceLastSummary = now - this.lastSummaryTime;
+
+      if (
+        this.config.autoSummarize &&
+        this.memoryBuffer.length >= this.config.maxHistoryLines &&
+        timeSinceLastSummary >= this.config.updateInterval
+      ) {
+        this.summarizeMemory();
+      }
+    } catch (error) {
+      this.logger.error('Error checking auto-summarize:', error);
+    }
+  }
+
+  /**
+   * Summarize current memory buffer
+   */
+  async summarizeMemory() {
+    try {
+      if (this.memoryBuffer.length === 0) {
+        this.logger.warn('No messages to summarize');
+        return null;
+      }
+
+      const text = this.memoryBuffer
+        .map((msg) => `${msg.speaker}: ${msg.text}`)
+        .join('\n');
+
+      // Use summarizer to create summary
+      const summary = await this.summarizer.summarize(text);
+
+      if (summary) {
+        this.lastSummaryTime = Date.now();
+        this.logger.log('Memory summarized successfully');
+
+        // Clear buffer after summarizing
+        this.memoryBuffer = [];
+
+        return summary;
+      }
+    } catch (error) {
+      this.logger.error('Error during summarization:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Get current memory statistics
+   */
+  getStats() {
+    return {
+      bufferSize: this.memoryBuffer.length,
+      isInitialized: this.isInitialized,
+      config: this.config,
+      lastSummaryTime: this.lastSummaryTime,
+    };
+  }
+
+  /**
+   * Create UI elements
+   */
+  createUI() {
+    try {
+      // Create settings panel
+      const settingsPanel = document.createElement('div');
+      settingsPanel.id = 'memory-summarize-settings';
+      settingsPanel.className = 'memory-summarize-panel';
+      settingsPanel.innerHTML = `
+        <div class="memory-settings">
+          <h3>Memory Summarize Settings</h3>
+          <label>
+            <input type="checkbox" id="ms-enabled" ${this.config.enabled ? 'checked' : ''}>
+            Enable Plugin
+          </label>
+          <label>
+            <input type="checkbox" id="ms-auto" ${this.config.autoSummarize ? 'checked' : ''}>
+            Auto-Summarize
+          </label>
+          <label>
+            Summary Length:
+            <select id="ms-length">
+              <option value="short" ${this.config.summaryLength === 'short' ? 'selected' : ''}>Short</option>
+              <option value="medium" ${this.config.summaryLength === 'medium' ? 'selected' : ''}>Medium</option>
+              <option value="long" ${this.config.summaryLength === 'long' ? 'selected' : ''}>Long</option>
+            </select>
+          </label>
+          <button id="ms-summarize-now">Summarize Now</button>
+          <button id="ms-reset">Reset Memory</button>
+          <div id="ms-status">Status: Ready</div>
+        </div>
+      `;
+
+      // Add event listeners to UI
+      document.addEventListener('DOMContentLoaded', () => {
+        const enabledCheckbox = document.getElementById('ms-enabled');
+        const autoCheckbox = document.getElementById('ms-auto');
+        const lengthSelect = document.getElementById('ms-length');
+        const summarizeBtn = document.getElementById('ms-summarize-now');
+        const resetBtn = document.getElementById('ms-reset');
+
+        if (enabledCheckbox) {
+          enabledCheckbox.addEventListener('change', (e) => {
+            this.config.enabled = e.target.checked;
+            this.saveConfig();
+          });
+        }
+
+        if (autoCheckbox) {
+          autoCheckbox.addEventListener('change', (e) => {
+            this.config.autoSummarize = e.target.checked;
+            this.saveConfig();
+          });
+        }
+
+        if (lengthSelect) {
+          lengthSelect.addEventListener('change', (e) => {
+            this.config.summaryLength = e.target.value;
+            this.saveConfig();
+          });
+        }
+
+        if (summarizeBtn) {
+          summarizeBtn.addEventListener('click', () => {
+            this.summarizeMemory();
+            this.updateStatus('Summarized!');
+          });
+        }
+
+        if (resetBtn) {
+          resetBtn.addEventListener('click', () => {
+            this.memoryBuffer = [];
+            this.updateStatus('Memory reset');
+          });
+        }
+      });
+
+      this.logger.log('UI created');
+    } catch (error) {
+      this.logger.warn('Could not create UI:', error);
+    }
+  }
+
+  /**
+   * Update status display
+   */
+  updateStatus(message) {
+    try {
+      const statusDiv = document.getElementById('ms-status');
+      if (statusDiv) {
+        statusDiv.textContent = `Status: ${message}`;
+      }
+    } catch (error) {
+      this.logger.warn('Could not update status:', error);
+    }
+  }
+
+  /**
+   * Cleanup plugin
+   */
+  destroy() {
+    try {
+      this.logger.log('Destroying plugin');
+      this.memoryBuffer = [];
+      this.isInitialized = false;
+    } catch (error) {
+      this.logger.error('Error during cleanup:', error);
+    }
+  }
+}
+
+// Export plugin instance
+export default new MemorySummarizePlugin();

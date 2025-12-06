@@ -1,7 +1,7 @@
 <div id="titan-memory-settings">
     <div class="inline-drawer">
         <div class="inline-drawer-toggle inline-drawer-header">
-            <b>Titan Memory: Librarian Edition</b>
+            <b>Titan Memory: Full Metal</b>
             <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
         </div>
         <div class="inline-drawer-content">
@@ -17,50 +17,53 @@
 
             <hr>
 
-            <h3>統 Librarian (Entity Splitter)</h3>
+            <h3>🧠 The Librarian (Summarizer)</h3>
             <div class="text_msg_hint" style="margin-bottom: 10px; font-size: 0.8em; opacity: 0.8;">
-                The Librarian analyzes conversation and automatically updates specific Lorebook entries (Characters, Places) instead of writing one long summary.
+                Analyzes recent messages and updates the Lorebook.
             </div>
 
             <div class="flex-container align-items-center justify-content-space-between">
-                <label title="Automatically run the Librarian analysis every X messages.">Auto-Analyze</label>
+                <label title="Automatically run the analysis as you chat.">Auto-Analyze</label>
                 <input type="checkbox" id="titan-auto-summarize" />
             </div>
             <div class="flex-container align-items-center justify-content-space-between">
                 <label title="How many new messages to wait before running the analysis again.">Update Frequency (Messages)</label>
                 <input type="number" id="titan-threshold" class="text_pole" min="1" max="100" placeholder="20" />
             </div>
-             <div class="flex-container align-items-center justify-content-space-between">
-                <label title="Ensures generated updates are saved to the World Info (Lorebook). Keep this ON for Librarian mode.">Sync to Lorebook</label>
-                <input type="checkbox" id="titan-lorebook-sync" checked />
+            
+            <hr>
+
+            <h3>🛡️ Smart Filters</h3>
+            <div class="flex-container align-items-center justify-content-space-between">
+                <label title="Ignore short messages (like 'ok', 'lol'). Helps save tokens.">Min Message Length (Chars)</label>
+                <input type="number" id="titan-min-length" class="text_pole" min="1" max="500" placeholder="50" />
             </div>
 
             <hr>
 
-            <h3>尅 Token Budget & Pruning</h3>
+            <h3>🧹 The Janitor (Consolidation)</h3>
+            <div class="text_msg_hint" style="margin-bottom: 10px; font-size: 0.8em; opacity: 0.8;">
+                Merges old, fragmented memories into larger "Archive" entries to keep the Lorebook clean.
+            </div>
+            <div class="flex-container align-items-center justify-content-space-between">
+                <label title="Enable automatic merging of old entries.">Enable Janitor</label>
+                <input type="checkbox" id="titan-consolidation" />
+            </div>
+            <div class="flex-container align-items-center justify-content-space-between">
+                <label title="Trigger the Janitor when you have more than X entries.">Max Entries Before Merge</label>
+                <input type="number" id="titan-consolidation-threshold" class="text_pole" min="5" max="100" placeholder="10" />
+            </div>
+
+            <hr>
+
+            <h3>🔪 Token Budget & Pruning</h3>
             <div class="flex-container align-items-center justify-content-space-between">
                 <label title="Hides old messages to keep the chat size small. Essential for long RPs.">Enable Smart Pruning</label>
                 <input type="checkbox" id="titan-pruning" />
             </div>
             <div class="flex-container align-items-center justify-content-space-between">
-                <label title="Max tokens allowed for Context. The extension will prune messages to keep the total (History + Memory) under this limit.">Total Token Budget</label>
+                <label title="Max tokens allowed for Context.">Total Token Budget</label>
                 <input type="number" id="titan-token-budget" class="text_pole" min="500" max="100000" placeholder="1000" />
-            </div>
-
-            <hr>
-
-            <h3>ｧ Deep Storage (RAG)</h3>
-            <div class="text_msg_hint" style="margin-bottom: 10px; font-size: 0.8em; opacity: 0.8;">
-                "Brain Button" clicks are always saved here. Enable this to also auto-save old pruned messages.
-            </div>
-            <div class="flex-container align-items-center justify-content-space-between">
-                <label title="Turn old messages into vectors and retrieve them when relevant.">Enable Vector Recall</label>
-                <input type="checkbox" id="titan-rag-enabled" />
-            </div>
-            
-            <div class="flex-container align-items-center justify-content-space-between">
-                <label>Embedding API Key (OpenAI)</label>
-                <input type="password" id="titan-rag-key" class="text_pole" placeholder="Leave empty if using Global Settings" />
             </div>
 
             <hr>
@@ -69,22 +72,30 @@
                 <button id="titan-save" class="menu_button" title="Save changes">
                     <i class="fa-solid fa-save"></i> Save Settings
                 </button>
-                <button id="titan-now" class="menu_button" title="Force the Librarian to analyze the chat NOW.">
+                <button id="titan-now" class="menu_button" title="Force Analysis NOW">
                     <i class="fa-solid fa-bolt"></i> Run Analysis
                 </button>
-                <button id="titan-wipe" class="menu_button red_button" title="Wipe all memory indexes (Dangerous)">
+                <button id="titan-wipe" class="menu_button red_button" title="Wipe all memory (Dangerous)">
                     <i class="fa-solid fa-trash"></i> Wipe Memory
                 </button>
             </div>
             
             <div style="margin-top: 15px;">
-                <label><strong>Librarian Prompt Template</strong></label>
+                <label><strong>Librarian Prompt (Summarizer)</strong></label>
                 <div class="text_msg_hint" style="font-size: 0.8em; margin-bottom: 5px;">
-                    <b>Warning:</b> Must maintain the <code>ENTRY:</code> and <code>KEYWORDS:</code> format for the splitter to work.
+                    Instructions for extracting new facts.
                 </div>
-                <textarea id="titan-prompt-template" class="text_pole" rows="8"></textarea>
+                <textarea id="titan-prompt-template" class="text_pole" rows="6"></textarea>
+            </div>
+
+            <div style="margin-top: 15px;">
+                <label><strong>Janitor Prompt (Merger)</strong></label>
+                <div class="text_msg_hint" style="font-size: 0.8em; margin-bottom: 5px;">
+                    Instructions for merging old records.
                 </div>
+                <textarea id="titan-merge-prompt" class="text_pole" rows="6"></textarea>
+            </div>
 
         </div>
     </div>
-</div>
+</div>	

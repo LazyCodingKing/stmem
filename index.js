@@ -1,486 +1,578 @@
 import {
     getContext,
     extension_settings,
-    saveMetadataDebounced,
-    eventSource,
-    event_types
+    saveMetadataDebounced
 } from "../../../extensions.js";
+
 import {
     saveSettingsDebounced,
     generateRaw,
     main_api,
-    chat_metadata
+    chat_metadata,
+    eventSource,
+    event_types,
+    saveMetadata,
 } from "../../../../script.js";
+
+import {
+    loadWorldInfo,
+    saveWorldInfo,
+    createWorldInfoEntry,
+    createNewWorldInfo,
+    world_names,
+    reloadEditor,
+    METADATA_KEY 
+} from "../../../world-info.js";
+
+import { SlashCommandParser } from '../../../slash-commands/SlashCommandParser.js';
+import { SlashCommand } from '../../../slash-commands/SlashCommand.js';
+import { ARGUMENT_TYPE, SlashCommandArgument } from '../../../slash-commands/SlashCommandArgument.js';
 
 const MODULENAME = "titan-memory";
 const MODULENAME_FANCY = "Titan Memory";
 
-// --- DEFAULT SETTINGS (Upgraded for Structured Memory) ---
+// --- SETTINGS ---
 const defaults = {
     enabled: true,
     debug: true,
     show_toasts: false, 
-    
-    // Summarization / Librarian Mode
     autosummarize: true,
-    threshold: 20, // Summarize every 20 messages by default
-    maxsummarylength: 1500,
+    threshold: 20,
+    min_message_length: 50,
     
-    // NEW: Structured Prompt for "Entity Splitter"
-    prompttemplate: `[System Note: You are an advanced Memory Manager. 
-Analyze the Recent Conversation. 
-Identify new facts about Characters, Locations, or Current Goals.
-Do NOT write a narrative summary. Break updates into distinct ENTRIES.
+    // Consolidation
+    consolidation_enabled: true,
+    consolidation_threshold: 10, 
+    
+    // Prompt
+    prompttemplate: `[System Note: You are a strict Database Archivist.
+Your goal is to extract facts from the provided text for a wiki.
 
-OUTPUT FORMAT:
-ENTRY: [Topic Name]
-KEYWORDS: [comma, separated, tags]
-CONTENT: [Concise facts. Use present tense.]
+CONTEXT:
+- The Main Character is: "{{CHAR}}".
+- The User is: "{{USER}}".
 
 RULES:
-1. If a topic exists, merge new info.
-2. Ignore trivial chit-chat.
-3. Create separate entries for distinct entities.
+1. First, write a concise, numbered list (1-3 points) summarizing the key events.
+2. Follow the list with the exact delimiter: --- ENTITY DATA ---
+3. Below the delimiter, extract ONLY facts explicitly written in the Input Text.
+4. NORMALIZE ENTITIES: If the text refers to "{{CHAR}}" by a nickname, alias, or description (e.g., "The Witch", "She"), file it under "ENTRY: {{CHAR}}". Do not create separate entries for the same person.
+5. If the input contains no new factual information, output ONLY the delimiter and the "NO DATA" flag.
 
-EXAMPLE:
-ENTRY: The Old Mill
-KEYWORDS: location, base
-CONTENT: Secured by the party. Roof is leaking.
+INPUT TEXT:
+"""
+{{NEWLINES}}
+"""
 
-ENTRY: Princess Kael
-KEYWORDS: character, ally
-CONTENT: Injured left arm. Trusts the player now.]`,
+OUTPUT FORMAT:
+1. [Summary Point 1]
+2. [Summary Point 2]
+--- ENTITY DATA ---
+ENTRY: [Subject Name]
+KEYWORDS: [tag1, tag2]
+CONTENT: [The specific fact found in the text]
 
-    // Aggressive Pruning
+BEGIN LOG:`,
+    
+    merge_prompt: `[System Note: You are a Historian. Your task is to merge several fragmented records into a single cohesive entry.
+    
+    INPUT RECORDS:
+    """
+    {{RECORDS}}
+    """
+    
+    INSTRUCTIONS:
+    1. Combine the facts from the records above.
+    2. Remove duplicates and resolve contradictions (favoring the latest info).
+    3. Output a single JSON object.
+    
+    FORMAT:
+    {
+        "title": "Combined Archive",
+        "keywords": ["tag1", "tag2"],
+        "content": "The combined narrative summary of these events..."
+    }
+    ]`,
+
     pruningenabled: true,
     tokenbudget: 1000, 
-
-    // Lorebook
-    lorebooksync: true, // Default to TRUE for Entity Splitter
-    injectprompt: false, // Default to FALSE to prevent "Double Dip"
-
-    // RAG
-    ragenabled: false,
-    ragurl: "https://api.openai.com/v1/embeddings",
-    ragkey: "",
-    ragdepth: 3
+    lorebooksync: true
 };
 
 let isProcessing = false;
 
-// --- LOGGING & TOASTS ---
+// --- HELPERS ---
 function log(...args) { console.log(`[${MODULENAME_FANCY}]`, ...args); }
 function debug(...args) { if (extension_settings[MODULENAME]?.debug) console.log(`[DEBUG ${MODULENAME_FANCY}]`, ...args); }
-function error(...args) { console.error(`[${MODULENAME_FANCY}]`, ...args); toastr.error(args.join(" "), MODULENAME_FANCY); }
-
-function toast(message, type = "info") {
-    if (type === "success" && !getSetting("show_toasts")) return;
-    if (window.toastr && window.toastr[type]) window.toastr[type](message, MODULENAME_FANCY);
+function toast(msg, type = "info") { 
+    if (window.toastr && getSetting("show_toasts")) window.toastr[type](msg, MODULENAME_FANCY); 
 }
 
-// --- SETTINGS HELPERS ---
-function getSetting(key) {
-    return extension_settings[MODULENAME]?.[key] ?? defaults[key];
-}
-function setSetting(key, value) {
+function getSetting(key) { return extension_settings[MODULENAME]?.[key] ?? defaults[key]; }
+function setSetting(key, val) { 
     if (!extension_settings[MODULENAME]) extension_settings[MODULENAME] = {};
-    extension_settings[MODULENAME][key] = value;
+    extension_settings[MODULENAME][key] = val;
     saveSettingsDebounced();
 }
-function getChatMetadata(key) {
-    return chat_metadata[MODULENAME]?.[key];
-}
-function setChatMetadata(key, value) {
+function getChatMetadata(key) { return chat_metadata[MODULENAME]?.[key]; }
+function setChatMetadata(key, val) {
     if (!chat_metadata[MODULENAME]) chat_metadata[MODULENAME] = {};
-    chat_metadata[MODULENAME][key] = value;
+    chat_metadata[MODULENAME][key] = val;
     saveMetadataDebounced();
 }
 
-// --- UI & BUTTONS (ReMemory Feature) ---
-function initializeUI() {
-    // Watch for new messages to inject buttons
-    const observer = new MutationObserver((mutations) => {
-        mutations.forEach((mutation) => {
-            mutation.addedNodes.forEach((node) => {
-                if (node.nodeType === 1 && $(node).hasClass('mes')) {
-                    injectTitanButtons($(node));
-                }
-            });
-        });
-    });
-    
-    // Start observing
-    const chatContainer = document.querySelector('#chat');
-    if (chatContainer) {
-        observer.observe(chatContainer, { childList: true, subtree: true });
-    }
+// --- ROBUST JSON PARSER ---
+function normalizeText(s) {
+    return String(s || '').replace(/\r\n/g, '\n').replace(/^\uFEFF/, '').replace(/[\u200B-\u200D\u2060]/g, '');
 }
 
-function injectTitanButtons($msg) {
-    if ($msg.find('.titan-memory-btn').length > 0) return;
+function extractFencedBlocks(s) {
+    const re = /```([\w+-]*)\s*([\s\S]*?)```/g;
+    const out = [];
+    let m;
+    while ((m = re.exec(s)) !== null) out.push((m[2] || '').trim());
+    return out;
+}
 
-    // The "Brain Button"
-    const $btn = $(`<div class="titan-memory-btn fa-solid fa-brain" title="Titan Memory: Force Save this detail"></div>`);
-    
-    $btn.css({
-        'cursor': 'pointer', 'margin-left': '8px', 'opacity': '0.3', 
-        'display': 'inline-block', 'transition': 'opacity 0.2s'
-    });
-
-    $btn.hover(
-        function() { $(this).css('opacity', '1'); },
-        function() { $(this).css('opacity', '0.3'); }
-    );
-
-    $btn.click(async function(e) {
-        e.stopPropagation();
-        const messageText = $msg.find('.mes_text').text();
-        
-        $(this).css('color', '#00ff00').addClass('fa-spin');
-        toast("Archiving specific memory...", "info");
-
-        try {
-            // Force save to Vector Storage
-            await archiveMessageAsVector(messageText);
-            // Optional: Also force an entity update if you want
-            // await processStructuredMemory(messageText); 
-            toast("Memory permanently pinned.", "success");
-        } catch (err) {
-            toast("Failed to archive.", "error");
-            console.error(err);
-        } finally {
-            $(this).removeClass('fa-spin');
+function extractBalancedJson(s) {
+    const start = s.search(/[\{\[]/);
+    if (start === -1) return null;
+    let depth = 0, inStr = false, esc = false;
+    for (let i = start; i < s.length; i++) {
+        const ch = s[i];
+        if (inStr) {
+            if (esc) esc = false; else if (ch === '\\') esc = true; else if (ch === '"') inStr = false;
+            continue;
         }
-    });
-
-    const $target = $msg.find('.name_text');
-    if ($target.length) $target.after($btn);
-    else $msg.prepend($btn);
-}
-
-// --- SLASH COMMANDS ---
-function registerTitanCommands() {
-    if (window.SlashCommandParser) {
-        window.SlashCommandParser.addCommandObject({
-            name: "endscene",
-            callback: async () => {
-                toast("Closing scene and processing memory...", "info");
-                await runSummarization();
-                return "Scene closed. Memory banks updated.";
-            },
-            help: "Force Titan Memory to summarize the current scene immediately."
-        });
-    }
-}
-
-// --- CORE: VECTOR / RAG ---
-async function getEmbedding(text) {
-    if (!text) return null;
-    const context = SillyTavern.getContext();
-    const vectorSettings = context.extensionSettings?.vectors;
-
-    // Use global vector settings if available
-    if (vectorSettings && vectorSettings.enableFiles) {
-         // This is a simplified hook. In a real scenario, you'd match the specific provider logic (OpenAI/Ollama)
-         // For now, we fallback to manual logic if using standard OpenAI compatible API
-         if (vectorSettings.vectorProvider === 'openai') {
-             return await fetchOpenAIEmbedding(text, vectorSettings.api_url, vectorSettings.api_key || context.api_connections?.openai?.key, "text-embedding-3-small");
-         }
-    }
-    
-    // Fallback to manual settings
-    if (getSetting("ragenabled")) {
-        return await fetchOpenAIEmbedding(text, getSetting("ragurl"), getSetting("ragkey"), "text-embedding-3-small");
+        if (ch === '"') { inStr = true; continue; }
+        if (ch === '{' || ch === '[') depth++;
+        else if (ch === '}' || ch === ']') {
+            depth--;
+            if (depth === 0) return s.slice(start, i + 1).trim();
+        }
     }
     return null;
 }
 
-async function fetchOpenAIEmbedding(text, url, key, model) {
-    try {
-        const response = await fetch(url, {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${key}` },
-            body: JSON.stringify({ input: text, model: model })
-        });
-        const data = await response.json();
-        return data?.data?.[0]?.embedding || null;
-    } catch (e) { console.error(e); return null; }
+function robustJSONParse(text) {
+    const normalized = normalizeText(text);
+    const candidates = [];
+    const fenced = extractFencedBlocks(normalized);
+    if (fenced.length) candidates.push(...fenced);
+    const balanced = extractBalancedJson(normalized);
+    if (balanced) candidates.push(balanced);
+    candidates.push(normalized);
+
+    for (const cand of candidates) {
+        try {
+            const cleaned = cand
+                .replace(/\/\/.*$/gm, '') 
+                .replace(/\/\*[\s\S]*?\*\//g, '') 
+                .replace(/,\s*([\]}])/g, '$1'); 
+            return JSON.parse(cleaned);
+        } catch (e) { continue; }
+    }
+    return null;
 }
 
-async function archiveMessageAsVector(text) {
-    const vector = await getEmbedding(text);
-    if (!vector) return;
+// --- CORE: LOREBOOK MANAGEMENT ---
+async function batchUpdateLorebook(entriesToProcess) {
+    const ctx = getContext();
+    if (!ctx.characterId && !ctx.groupId) return 0;
+    
+    let charName = "Unknown";
+    if (ctx.characterId) {
+        charName = ctx.characters[ctx.characterId].name;
+    } else if (ctx.groupId && ctx.groups) {
+        const group = ctx.groups.find(g => g.id === ctx.groupId);
+        if (group) charName = group.name;
+    }
+    const bookName = `Titan Memory - ${charName}`.replace(/[\/\\:*?"<>|]/g, '_');
 
-    let store = getChatMetadata("vector_store") || [];
-    store.push({ text: text.substring(0, 500), vector: vector, timestamp: Date.now() });
-    setChatMetadata("vector_store", store);
-    debug("Archived to Vector Store:", text.substring(0, 20) + "...");
-}
-
-async function retrieveRAGContext(query) {
-    const vector = await getEmbedding(query);
-    if (!vector) return "";
-
-    let store = getChatMetadata("vector_store") || [];
-    if (store.length === 0) return "";
-
-    // Cosine Similarity
-    const similarity = (a, b) => {
-        let dot = 0, magA = 0, magB = 0;
-        for (let i = 0; i < a.length; i++) {
-            dot += a[i] * b[i]; magA += a[i] * a[i]; magB += b[i] * b[i];
+    if (!world_names.includes(bookName)) {
+        try {
+            await createNewWorldInfo(bookName);
+            chat_metadata[METADATA_KEY] = bookName;
+            await saveMetadata();
+            toast(`Created & Bound: ${bookName}`, "success");
+        } catch (e) {
+            console.error("Creation Failed", e);
+            return 0;
         }
-        return dot / (Math.sqrt(magA) * Math.sqrt(magB));
-    };
-
-    let scored = store.map(item => ({ text: item.text, score: similarity(vector, item.vector) }));
-    scored.sort((a, b) => b.score - a.score);
-    
-    const matches = scored.slice(0, getSetting("ragdepth") || 3).filter(m => m.score > 0.7);
-    return matches.map(m => m.text).join("\n");
-}
-
-// --- CORE: LOREBOOK (The Librarian) ---
-async function updateSpecificLorebookEntry(title, keywords, content) {
-    const ctx = SillyTavern.getContext();
-    if (!ctx.characterId) return;
-
-    const charName = ctx.characters[ctx.characterId].name;
-    const bookName = `Titan Memory - ${charName}`;
-    
-    // 1. Ensure Book Exists
-    let lorebook = ctx.lorebook.lorebooks.find(lb => lb.name === bookName);
-    if (!lorebook) {
-        lorebook = { name: bookName, entries: [], is_active: true };
-        ctx.lorebook.lorebooks.push(lorebook);
-        debug("Created new Lorebook:", bookName);
+    } else if (chat_metadata[METADATA_KEY] !== bookName) {
+        chat_metadata[METADATA_KEY] = bookName;
+        await saveMetadata();
     }
 
-    // 2. Find or Create Entry
-    let entry = lorebook.entries.find(e => e.displayName.toLowerCase() === title.toLowerCase());
-    
-    if (entry) {
-        // Merge Logic
-        entry.content += `\n${content}`;
-        // Update keys if new list is longer
-        if (keywords.length > entry.keys.length) entry.keys = keywords.split(',').map(k => k.trim());
-        debug(`Updated entry: ${title}`);
-    } else {
-        // Create Logic
-        const newEntry = {
-            uid: Date.now(),
-            displayName: title,
-            keys: keywords.split(',').map(k => k.trim()),
-            content: content,
-            enabled: true,
-            insertion_order: 100,
-            case_sensitive: false
-        };
-        lorebook.entries.push(newEntry);
-        debug(`Created entry: ${title}`);
-    }
-    
-    // Save
-    ctx.saveLorebook();
-}
+    let lorebookData = await loadWorldInfo(bookName);
+    if (!lorebookData) return 0;
 
-async function processStructuredMemory(responseText) {
-    const entryRegex = /ENTRY:\s*(.*?)\nKEYWORDS:\s*(.*?)\nCONTENT:\s*([\s\S]*?)(?=(?:ENTRY:|$))/gi;
-    let match;
-    let entriesFound = 0;
+    let updates = 0;
+    for (const item of entriesToProcess) {
+        let title = item.title.replace(/\*\*/g, '').trim();
+        if (title.toUpperCase() === "NO DATA" || title.includes("Input Text")) continue; 
 
-    while ((match = entryRegex.exec(responseText)) !== null) {
-        const title = match[1].trim();
-        const keywords = match[2].trim();
-        const content = match[3].trim();
+        if (title.toLowerCase() === "you" || title.toLowerCase() === "she" || title.toLowerCase() === "he") {
+            title = charName;
+        }
 
-        if (title && content) {
-            await updateSpecificLorebookEntry(title, keywords, content);
-            entriesFound++;
+        const content = item.content.trim();
+        const keywords = Array.isArray(item.keywords) ? item.keywords.join(',') : item.keywords;
+        const searchTitle = title.toLowerCase().trim();
+
+        const entriesArray = Object.values(lorebookData.entries || {});
+        let entry = entriesArray.find(e => (e.displayName || e.comment || "").toLowerCase().trim() === searchTitle);
+
+        if (entry) {
+            if (!entry.content.includes(content)) entry.content += `\n${content}`;
+            const newKeys = keywords.split(',').map(k => k.trim());
+            entry.key = [...new Set([...(entry.key || []), ...newKeys])];
+            updates++;
+        } else {
+            let newEntry = createWorldInfoEntry(bookName, lorebookData);
+            if (newEntry) {
+                newEntry.displayName = title;
+                newEntry.comment = title;
+                newEntry.key = keywords.split(',').map(k => k.trim());
+                newEntry.content = content;
+                newEntry.enabled = true;
+                newEntry.stmemorybooks = true; 
+                updates++;
+            }
         }
     }
-    return entriesFound;
+
+    if (updates > 0) {
+        await saveWorldInfo(bookName, lorebookData, true);
+        if (typeof reloadEditor === 'function') reloadEditor(bookName);
+        if (getSetting("debug") || getSetting("show_toasts")) toast(`Saved ${updates} memories.`, "success");
+    }
+    
+    if (getSetting("consolidation_enabled")) {
+        await runJanitor(bookName, lorebookData);
+    }
+    
+    return updates;
 }
 
-// --- CORE: PRUNING (Budget Aware) ---
-async function handlePruning() {
-    if (!getSetting("enabled") || !getSetting("pruningenabled")) return;
+// --- CORE: THE JANITOR (Consolidation) ---
+async function runJanitor(bookName, lorebookData) {
+    const entries = Object.values(lorebookData.entries || {});
+    const candidates = entries.filter(e => 
+        e.enabled && 
+        !e.constant && 
+        !e.comment.includes("Consolidated") &&
+        e.stmemorybooks
+    );
+
+    const threshold = getSetting("consolidation_threshold") || 10;
+    
+    if (candidates.length > threshold) {
+        debug(`Janitor: Found ${candidates.length} candidates. Threshold is ${threshold}. Consolidating...`);
+        const toMerge = candidates.slice(0, 3);
+        const recordsText = toMerge.map(e => `Title: ${e.comment}\nKeywords: ${e.key.join(', ')}\nContent: ${e.content}`).join("\n---\n");
+        const prompt = getSetting("merge_prompt").replace("{{RECORDS}}", recordsText);
+        
+        try {
+            const result = await generateRaw({ prompt: prompt, temperature: 0.3 }, main_api);
+            const parsed = robustJSONParse(result);
+            
+            if (parsed && parsed.content) {
+                let newEntry = createWorldInfoEntry(bookName, lorebookData);
+                newEntry.displayName = parsed.title || "Consolidated Archive";
+                newEntry.comment = `Consolidated Archive [${new Date().toLocaleDateString()}]`;
+                newEntry.key = parsed.keywords || ["archive", "history"];
+                newEntry.content = parsed.content;
+                newEntry.stmemorybooks = true;
+                newEntry.enabled = true;
+
+                toMerge.forEach(e => { delete lorebookData.entries[e.uid]; });
+
+                await saveWorldInfo(bookName, lorebookData, true);
+                if (typeof reloadEditor === 'function') reloadEditor(bookName);
+                console.log(`[Titan Janitor] Merged ${toMerge.length} entries into 1.`);
+                toast("Titan Janitor: Optimized Memory", "success");
+            }
+        } catch (e) {
+            console.error("Janitor Failed:", e);
+        }
+    }
+}
+
+// --- CORE: PROCESSING ---
+async function runSummarization(forcedCount = null) {
+    if (isProcessing) return;
+    isProcessing = true;
+
+    const $btn = $(".titan-memory-btn");
+    $btn.addClass("fa-spin"); 
 
     const ctx = getContext();
     const chat = ctx.chat;
-    if (!chat || chat.length === 0) return;
-
-    // 1. Calculate Summary Cost (approximate)
-    // In Entity mode, we can't easily count all Lorebook entries, 
-    // so we assume a 'Active Memory Load' reserve of 300 tokens.
-    const summaryReserve = 300; 
     
+    let newMessages;
+    if (forcedCount) {
+        newMessages = chat.slice(-forcedCount);
+        debug(`Manual trigger: Processing last ${forcedCount} messages.`);
+    } else {
+        const lastIndex = getChatMetadata("last_index") || 0;
+        newMessages = chat.slice(lastIndex);
+    }
+    
+    if (newMessages.length === 0) { 
+        isProcessing = false; 
+        $btn.removeClass("fa-spin");
+        return; 
+    }
+
+    const newLines = newMessages.map(m => `${m.name}: ${m.mes}`).join("\n");
+    
+    if (!forcedCount && newLines.length < (getSetting("min_message_length") || 50)) {
+        debug("Input too short (Smart Filter). Skipping.");
+        isProcessing = false;
+        $btn.removeClass("fa-spin");
+        return;
+    }
+
+    let charName = "Character";
+    let userName = "User";
+    if (ctx.characterId && ctx.characters[ctx.characterId]) charName = ctx.characters[ctx.characterId].name;
+    if (chat.length > 0 && chat[0].is_user) userName = chat[0].name; 
+
+    let prompt = getSetting("prompttemplate")
+        .replace("{{NEWLINES}}", newLines)
+        .replace(/{{CHAR}}/g, charName)
+        .replace(/{{USER}}/g, userName);
+
+    const genOverrides = {
+        prompt: prompt,
+        temperature: 0.1,    
+        top_k: 0,           
+        top_p: 0.1,         
+        min_p: 0,
+        repetition_penalty: 1.0,
+        max_length: 500,    
+    };
+
+    try {
+        let result;
+        try { 
+            result = await generateRaw(genOverrides, main_api); 
+        } catch { 
+            result = await generateRaw(prompt, main_api); 
+        }
+
+        if (!result) throw new Error("No response");
+
+        let summaryText = "";
+        let entityData = result;
+
+        if (result.includes("--- ENTITY DATA ---")) {
+            const parts = result.split("--- ENTITY DATA ---", 2);
+            summaryText = parts[0].trim();
+            entityData = parts[1].trim();
+        } 
+        
+        if (summaryText) {
+            console.log(`%c[TITAN SUMMARY]:\n${summaryText}`, "color: #ffcc00; font-weight: bold;");
+        }
+        
+        if (entityData.includes("NO DATA")) {
+            debug("AI reported no new data.");
+            if (!forcedCount) setChatMetadata("last_index", chat.length);
+        } else {
+            const entryRegex = /[\*\#\s]*ENTRY[\*\#\s]*:\s*(.*?)\n[\*\#\s]*KEYWORDS[\*\#\s]*:\s*(.*?)\n[\*\#\s]*CONTENT[\*\#\s]*:\s*([\s\S]*?)(?=(?:[\*\#\s]*ENTRY|$))/gi;
+            let match;
+            const batch = [];
+            
+            while ((match = entryRegex.exec(entityData)) !== null) {
+                if (match[1] && match[3]) batch.push({ title: match[1], keywords: match[2], content: match[3] });
+            }
+
+            if (batch.length > 0) {
+                await batchUpdateLorebook(batch);
+                setChatMetadata("last_index", chat.length);
+                $btn.css("color", "#00ff00");
+                setTimeout(() => $btn.css("color", ""), 2000);
+            }
+        }
+
+    } catch (e) {
+        console.error("Analysis Failed", e);
+        toast("Titan Memory Error", "error");
+        $btn.css("color", "#ff0000"); 
+    } finally {
+        isProcessing = false;
+        $btn.removeClass("fa-spin");
+        // No pruning call needed here anymore! The interceptor handles it.
+    }
+}
+
+// --- CORE: PHANTOM INTERCEPTOR (Replacement for Pruning) ---
+// This function runs automatically by SillyTavern BEFORE sending context to AI.
+globalThis.titan_memory_interceptor = function (chat, _contextSize, _abort, type) {
+    if (!getSetting("enabled") || !getSetting("pruningenabled")) return;
+
+    const ctx = getContext();
+    const IGNORE_SYMBOL = ctx.symbols ? ctx.symbols.ignore : Symbol("ignore");
+    
+    // Safety check: Don't mess with group chats dry-runs sometimes having odd types
+    if (type === 'dry') return; 
+
+    const summaryReserve = 500; 
     const maxBudget = getSetting("tokenbudget") || 1000;
     const availableChatBudget = Math.max(200, maxBudget - summaryReserve);
 
     let currentTokens = 0;
-    let prunePoint = -1;
+    let prunedCount = 0;
 
-    // 2. Count Backwards
+    // Iterate BACKWARDS (Newest -> Oldest)
     for (let i = chat.length - 1; i >= 0; i--) {
-        const msg = chat[i];
-        if (msg.extra && msg.extra.excludefromcontext) continue;
+        // Crucial: Create a shallow copy of the message so we don't modify the real chat history on disk
+        // We only modify the "extra" flags for this specific generation request.
+        chat[i] = { ...chat[i], extra: { ...chat[i].extra } };
 
-        const tokens = ctx.getTokenCount ? ctx.getTokenCount(msg.mes) : (msg.mes.length / 3.5);
-        currentTokens += tokens;
+        // If the message is already ignored manually, skip it
+        if (chat[i].extra[IGNORE_SYMBOL]) continue;
 
-        if (currentTokens > availableChatBudget) {
-            prunePoint = i;
-            break;
-        }
-    }
-
-    // 3. Prune
-    if (prunePoint > -1) {
-        debug(`Budget exceeded. Pruning older than index ${prunePoint}.`);
-        for (let i = 0; i <= prunePoint; i++) {
-            if (!chat[i].extra) chat[i].extra = {};
-            if (!chat[i].extra.excludefromcontext) {
-                // Last chance archive
-                if (getSetting("ragenabled")) await archiveMessageAsVector(chat[i].mes);
-                chat[i].extra.excludefromcontext = true;
-            }
-        }
-    }
-}
-
-// --- CORE: SUMMARIZATION ---
-async function runSummarization() {
-    if (isProcessing) return;
-    isProcessing = true;
-
-    const ctx = getContext();
-    const chat = ctx.chat;
-    const lastIndex = getChatMetadata("last_index") || 0;
-    
-    // Gather new messages
-    const newMessages = chat.slice(lastIndex);
-    if (newMessages.length === 0) { isProcessing = false; return; }
-
-    const newLines = newMessages.map(m => `${m.name}: ${m.mes}`).join("\n");
-
-    // Prepare Prompt
-    let prompt = getSetting("prompttemplate").replace("{{NEWLINES}}", newLines);
-
-    debug("Running Entity Splitter...");
-    toast("Updating Memory Banks...", "info");
-
-    try {
-        const result = await generateRaw(prompt, main_api);
-        if (!result) throw new Error("Empty response from AI");
-
-        // Parse and Update Lorebook
-        const count = await processStructuredMemory(result);
-
-        if (count > 0) {
-            toast(`Memory Updated: ${count} entities modified.`, "success");
-            setChatMetadata("last_index", chat.length);
+        // Calculate tokens
+        const tokens = ctx.getTokenCount ? ctx.getTokenCount(chat[i].mes) : (chat[i].mes.length / 3.5);
+        
+        // Check budget
+        if (currentTokens + tokens > availableChatBudget) {
+            // Budget exceeded: Mark this message as IGNORED
+            chat[i].extra[IGNORE_SYMBOL] = true;
+            prunedCount++;
         } else {
-            debug("AI returned no structured entries.");
+            currentTokens += tokens;
         }
-
-    } catch (e) {
-        error("Summarization failed:", e);
-    } finally {
-        isProcessing = false;
-        handlePruning();
     }
-}
-
-// --- EVENT LISTENERS ---
-function onNewMessage() {
-    if (!getSetting("enabled")) return;
-    const ctx = getContext();
-    const chat = ctx.chat;
-    const lastIndex = getChatMetadata("last_index") || 0;
-    const threshold = getSetting("threshold") || 20;
-
-    if (getSetting("autosummarize") && (chat.length - lastIndex >= threshold)) {
-        runSummarization();
-    }
-    handlePruning();
-}
-
-// --- INITIALIZATION ---
-jQuery(document).ready(function () {
-    const ctx = getContext();
     
-    // Hook RAG Injection
-    if (ctx.eventSource) {
-        ctx.eventSource.on(event_types.GENERATION_STARTED, async () => {
-            if (!getSetting("enabled") || !getSetting("ragenabled")) return;
-            const chat = ctx.chat;
-            const lastMsg = chat[chat.length - 1];
-            if (!lastMsg.is_user) return;
+    if (prunedCount > 0 && getSetting("debug")) {
+        console.log(`[Titan Interceptor] Hid ${prunedCount} old messages from AI context. (Used ${Math.round(currentTokens)}/${availableChatBudget} tokens)`);
+    }
+};
 
-            const context = await retrieveRAGContext(lastMsg.mes);
-            if (context) {
-                const ragText = `\n[Relevant Past Memories:\n${context}\n]`;
-                ctx.setExtensionPrompt(MODULENAME + 'rag', ragText, 0, 0, true);
-                debug("Injected RAG Context");
-            }
+// --- UI: BRAIN BUTTON INJECTION ---
+function injectBrainButton() {
+    if ($(".titan-memory-btn").length > 0) return;
+    
+    const $target = $("#send_but_sheld"); 
+    if ($target.length) {
+        const $btn = $(`<div id="titan-manual-trigger" class="titan-memory-btn fa-solid fa-brain" title="Force Titan Memory Analysis"></div>`);
+        $btn.css({
+            "cursor": "pointer",
+            "padding": "10px",
+            "opacity": "0.5",
+            "transition": "opacity 0.2s"
+        });
+        
+        $btn.hover(
+            function() { $(this).css("opacity", "1"); },
+            function() { $(this).css("opacity", "0.5"); }
+        );
+
+        $btn.click((e) => {
+            e.stopPropagation();
+            toast("Analyzing Last 50 Messages...", "info");
+            runSummarization(50);
         });
 
-        // Hook Messages
-        ctx.eventSource.on(event_types.USER_MESSAGE_RENDERED, onNewMessage);
-        ctx.eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, onNewMessage);
+        $target.prepend($btn);
+    }
+}
+
+// --- INIT ---
+jQuery(document).ready(function () {
+    console.log("%c [TITAN MEMORY] v11.0 (Phantom Protocol) Loaded ", "background: #00ff00; color: black; font-weight: bold;");
+
+    const registerCommands = () => {
+        if (!window.SlashCommandParser) return;
+
+        SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+            name: 'tm-now',
+            callback: () => { 
+                toast("Forcing analysis...", "info");
+                runSummarization(0); 
+            },
+            helpString: 'Force Titan Memory to analyze new messages immediately.'
+        }));
+
+        SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+            name: 'tm-scene',
+            callback: (namedArgs, unnamedArgs) => {
+                const count = parseInt(unnamedArgs[0]);
+                if (isNaN(count)) return toast("Please specify number of messages. e.g., /tm-scene 50", "warning");
+                toast(`Analyzing last ${count} messages...`, "info");
+                runSummarization(count);
+            },
+            helpString: 'Force Titan Memory to analyze the last X messages. Usage: /tm-scene 50',
+            unnamedArgumentList: [
+                SlashCommandArgument.fromProps({ 
+                    description: 'Number of messages', 
+                    typeList: [ARGUMENT_TYPE.NUMBER], 
+                    isRequired: true 
+                })
+            ]
+        }));
+    };
+
+    setTimeout(registerCommands, 2000);
+    setTimeout(injectBrainButton, 2500);
+
+    if (eventSource) {
+        eventSource.on(event_types.USER_MESSAGE_RENDERED, () => {
+            const chat = getContext().chat;
+            const lastIndex = getChatMetadata("last_index") || 0;
+            if (getSetting("autosummarize") && (chat.length - lastIndex >= getSetting("threshold"))) {
+                runSummarization();
+            }
+            // No handlePruning() call needed here!
+        });
         
-        // Hook Scene Load (to reset buttons)
-        ctx.eventSource.on(event_types.CHAT_CHANGED, initializeUI);
+        eventSource.on(event_types.CHAT_CHANGED, () => {
+            setTimeout(injectBrainButton, 500);
+        });
     }
 
-    // Register Extras
-    registerTitanCommands();
-    initializeUI(); // Initial run
+    const loadUI = async () => {
+        const scriptPath = import.meta.url.substring(0, import.meta.url.lastIndexOf('/'));
+        const response = await fetch(`${scriptPath}/settings.html`);
+        const html = await response.text();
+        $('#extensions_settings').append(html);
+
+        const bind = (id, key) => {
+            const $el = $(id);
+            const isChk = $el.attr("type") === "checkbox";
+            if (isChk) $el.prop("checked", getSetting(key)); else $el.val(getSetting(key));
+            $el.on("change input", function() {
+                setSetting(key, isChk ? $(this).prop("checked") : $(this).val());
+            });
+        };
+        
+        bind("#titan-enabled", "enabled");
+        bind("#titan-debug", "debug");
+        bind("#titan-auto-summarize", "autosummarize");
+        bind("#titan-threshold", "threshold");
+        bind("#titan-min-length", "min_message_length");
+        
+        bind("#titan-consolidation", "consolidation_enabled");
+        bind("#titan-consolidation-threshold", "consolidation_threshold");
+        bind("#titan-merge-prompt", "merge_prompt");
+
+        bind("#titan-pruning", "pruningenabled");
+        bind("#titan-token-budget", "tokenbudget");
+        bind("#titan-prompt-template", "prompttemplate");
+        
+        $("#titan-now").click(() => runSummarization());
+        $("#titan-save").click(() => toast("Settings Saved", "success"));
+        $("#titan-wipe").click(() => {
+            if(confirm("Wipe memory?")) {
+                setChatMetadata("last_index", 0);
+                toast("Memory Wiped", "error");
+            }
+        });
+    };
     
-    // Load Settings UI
-    loadSettingsHTML();
+    loadUI();
 });
-
-// --- UI LOADING ---
-async function loadSettingsHTML() {
-    const response = await fetch(`${import.meta.url.substring(0, import.meta.url.lastIndexOf('/'))}/settings.html`);
-    const html = await response.text();
-    $('#extensions_settings').append(html);
-
-    // Bindings
-    bindInput("#titan-enabled", "enabled");
-    bindInput("#titan-debug", "debug");
-    bindInput("#titan-pruning", "pruningenabled");
-    bindInput("#titan-token-budget", "tokenbudget");
-    bindInput("#titan-auto-summarize", "autosummarize");
-    bindInput("#titan-threshold", "threshold");
-    bindInput("#titan-lorebook-sync", "lorebooksync");
-    bindInput("#titan-rag-enabled", "ragenabled");
-    bindInput("#titan-rag-key", "ragkey");
-    bindInput("#titan-prompt-template", "prompttemplate");
-
-    $("#titan-now").click(() => runSummarization());
-    $("#titan-save").click(() => toast("Settings Saved", "success"));
-    $("#titan-wipe").click(() => {
-        if(confirm("Wipe memory?")) {
-            setChatMetadata("last_index", 0);
-            setChatMetadata("vector_store", []);
-            toast("Memory Wiped", "error");
-        }
-    });
-    
-    log("Titan Memory (Librarian Edition) Loaded");
-}
-
-function bindInput(selector, key) {
-    const $el = $(selector);
-    const type = $el.attr("type") === "checkbox" ? "checked" : "val";
-    const val = getSetting(key);
-    if (type === "checked") $el.prop("checked", val); else $el.val(val);
-
-    $el.on("change input", function() {
-        const newVal = type === "checked" ? $(this).prop("checked") : $(this).val();
-        setSetting(key, newVal);
-    });
-}

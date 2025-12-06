@@ -18,42 +18,26 @@ let settings = {};
 let memory_buffer = [];
 
 // --- Logging ---
-function log(message) {
-  console.log(`[${MODULE_NAME}]`, message);
-}
-
-function debug(message, ...args) {
-  if (settings.debug) {
-    console.log(`[${MODULE_NAME} DEBUG]`, message, ...args);
-  }
-}
-
-function error(message) {
-  console.error(`[${MODULE_NAME}]`, message);
-}
+function log(message) { console.log(`[${MODULE_NAME}]`, message); }
+function debug(message, ...args) { if (settings.debug) { console.log(`[${MODULE_NAME} DEBUG]`, message, ...args); } }
+function error(message) { console.error(`[${MODULE_NAME}]`, message); }
 
 // --- UI Update Functions ---
 function update_status(message, isError = false) {
   const statusEl = $('#ms-status-text');
   statusEl.text(message);
-  statusEl.closest('.status-display').removeClass('error success warning').addClass(isError ? 'error' : '');
+  statusEl.closest('.status-display').toggleClass('error', isError);
 }
 
 function update_display() {
   const context = getContext();
-  // Gracefully handle cases where no character is loaded
-  if (!context || !context.character) {
-    debug("update_display called but no character is loaded. Skipping.");
-    return;
-  }
+  if (!context || !context.character) return;
   
   const metadata = context.character.metadata?.[MODULE_NAME] || {};
-  
   $('#ms-buffer-count').text(`${memory_buffer.length} messages`);
   
   if (metadata.last_summary_time) {
-    const time = new Date(metadata.last_summary_time).toLocaleTimeString();
-    $('#ms-last-summary').text(time);
+    $('#ms-last-summary').text(new Date(metadata.last_summary_time).toLocaleTimeString());
   } else {
     $('#ms-last-summary').text('Never');
   }
@@ -72,52 +56,30 @@ async function summarize_memory() {
   }
   if (!settings.api_endpoint) {
     update_status('API Endpoint is not configured.', true);
-    error('Cannot summarize: API endpoint is missing.');
-    return;
+    return error('Cannot summarize: API endpoint is missing.');
   }
 
   update_status('Summarizing...');
   debug(`Summarizing ${memory_buffer.length} messages.`);
 
   const conversation = memory_buffer.map(msg => `${msg.speaker}: ${msg.text}`).join('\n');
-  const length_map = {
-    short: 'around 100 words',
-    medium: 'around 200 words',
-    long: 'around 300 words',
-  };
+  const length_map = { short: 'around 100 words', medium: 'around 200 words', long: 'around 300 words' };
   const prompt = `Human: Summarize the following conversation in the third person. The summary should be a concise narrative, capturing the key events, character actions, and emotional tone. The summary should be ${length_map[settings.summary_length]}.\n\nCONVERSATION:\n${conversation}\n\nAssistant: Here is a summary of the conversation:\n`;
 
   try {
     const response = await fetch(settings.api_endpoint, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': settings.api_key ? `Bearer ${settings.api_key}` : undefined,
-      },
-      body: JSON.stringify({
-        prompt: prompt,
-        max_new_tokens: 400,
-        temperature: 0.7,
-        top_p: 0.9,
-        stop: ['Human:', 'Assistant:'],
-      }),
+      headers: { 'Content-Type': 'application/json', 'Authorization': settings.api_key ? `Bearer ${settings.api_key}` : undefined },
+      body: JSON.stringify({ prompt, max_new_tokens: 400, temperature: 0.7, top_p: 0.9, stop: ['Human:', 'Assistant:'] }),
     });
 
-    if (!response.ok) {
-      throw new Error(`API request failed with status ${response.status}`);
-    }
-
+    if (!response.ok) throw new Error(`API request failed with status ${response.status}`);
     const data = await response.json();
     const summary = data.results?.[0]?.text?.trim();
-
-    if (!summary) {
-      throw new Error('API response did not contain a valid summary.');
-    }
+    if (!summary) throw new Error('API response did not contain a valid summary.');
 
     const context = getContext();
-    if (!context.character.metadata[MODULE_NAME]) {
-      context.character.metadata[MODULE_NAME] = {};
-    }
+    if (!context.character.metadata[MODULE_NAME]) context.character.metadata[MODULE_NAME] = {};
     context.character.metadata[MODULE_NAME].summary = summary;
     context.character.metadata[MODULE_NAME].last_summary_time = Date.now();
     saveMetadataDebounced();
@@ -127,7 +89,6 @@ async function summarize_memory() {
     update_status('Summary complete!');
     memory_buffer = [];
     update_display();
-
   } catch (err) {
     error(`Summarization failed: ${err.message}`);
     update_status(`Error: ${err.message}`, true);
@@ -136,24 +97,14 @@ async function summarize_memory() {
 
 // --- Event Handlers ---
 function onNewMessage(data) {
-  if (!settings.enabled) return;
-
-  const message = data;
-  if (!message || !message.mes || message.is_system) return;
-
-  memory_buffer.push({
-    timestamp: Date.now(),
-    text: message.mes,
-    speaker: message.name || 'Unknown',
-  });
+  if (!settings.enabled || !data.mes || data.is_system) return;
+  memory_buffer.push({ timestamp: Date.now(), text: data.mes, speaker: data.name || 'Unknown' });
   update_display();
 
   if (settings.auto_summarize && memory_buffer.length >= settings.max_history) {
     const metadata = getContext().character.metadata?.[MODULE_NAME] || {};
     const lastTime = metadata.last_summary_time || 0;
-    const timeSinceLastSummary = (Date.now() - lastTime) / 1000 / 60;
-
-    if (timeSinceLastSummary >= settings.update_interval) {
+    if ((Date.now() - lastTime) / 60000 >= settings.update_interval) {
       log('Auto-summarize triggered by buffer size and interval.');
       summarize_memory();
     }
@@ -161,23 +112,18 @@ function onNewMessage(data) {
 }
 
 function add_summary_to_context(context, text) {
-    if (!settings.enabled) return text;
-
-    const metadata = context.character?.metadata?.[MODULE_NAME] || {};
-    const summary = metadata.summary;
-
-    if (summary) {
-        debug('Injecting summary into context.');
-        const formattedSummary = `[This is a summary of the conversation so far:\n${summary}\n]`;
-        return `${formattedSummary}\n${text}`;
-    }
-    return text;
+  if (!settings.enabled) return text;
+  const summary = context.character?.metadata?.[MODULE_NAME]?.summary;
+  if (summary) {
+    debug('Injecting summary into context.');
+    return `[This is a summary of the conversation so far:\n${summary}\n]\n${text}`;
+  }
+  return text;
 }
 
 // --- Setup ---
 function setup_settings_ui() {
   const panel = $('#memory-summarize-settings');
-
   panel.on('change', '#ms-enabled', function() { settings.enabled = this.checked; save_settings(); });
   panel.on('change', '#ms-auto-summarize', function() { settings.auto_summarize = this.checked; save_settings(); });
   panel.on('change', '#ms-length', function() { settings.summary_length = $(this).val(); save_settings(); });
@@ -186,20 +132,10 @@ function setup_settings_ui() {
   panel.on('input', '#ms-api-endpoint', function() { settings.api_endpoint = $(this).val().trim(); save_settings(); });
   panel.on('input', '#ms-api-key', function() { settings.api_key = $(this).val().trim(); save_settings(); });
   panel.on('change', '#ms-debug', function() { settings.debug = this.checked; save_settings(); });
+  panel.on('click', '#ms-summarize-btn', async function() { $(this).prop('disabled', true); await summarize_memory(); $(this).prop('disabled', false); });
+  panel.on('click', '#ms-reset-btn', function() { memory_buffer = []; update_status('Memory buffer has been reset.'); update_display(); });
 
-  panel.on('click', '#ms-summarize-btn', async function() {
-    $(this).prop('disabled', true);
-    await summarize_memory();
-    $(this).prop('disabled', false);
-  });
-
-  panel.on('click', '#ms-reset-btn', function() {
-    memory_buffer = [];
-    update_status('Memory buffer has been reset.');
-    update_display();
-  });
-
-  // Set initial values from loaded settings
+  // Set initial values
   panel.find('#ms-enabled').prop('checked', settings.enabled);
   panel.find('#ms-auto-summarize').prop('checked', settings.auto_summarize);
   panel.find('#ms-length').val(settings.summary_length);
@@ -208,8 +144,6 @@ function setup_settings_ui() {
   panel.find('#ms-api-endpoint').val(settings.api_endpoint);
   panel.find('#ms-api-key').val(settings.api_key);
   panel.find('#ms-debug').prop('checked', settings.debug);
-  
-  // DEFERRED: We now call update_display() when a chat is loaded, not here.
   update_status('Ready');
 }
 
@@ -217,7 +151,6 @@ async function setup() {
   try {
     const loaded_settings = extension_settings[MODULE_NAME] || {};
     settings = { ...default_settings, ...loaded_settings };
-
     const context = getContext();
     
     const url = new URL(import.meta.url);
@@ -225,19 +158,14 @@ async function setup() {
     const response = await fetch(settings_path);
     if (!response.ok) return error(`Failed to load settings.html: ${response.status}`);
     
-    const html = await response.text();
-    $('#extensions_settings2').append(html);
-    
-    // This part is safe and does not depend on a character being loaded.
+    $('#extensions_settings2').append(await response.text());
     setup_settings_ui();
 
-    // Register event listeners
     context.eventSource.on('chat:new-message', onNewMessage);
-    
-    // *** THE FIX: Add an event listener to update the UI only when a character is loaded ***
     context.eventSource.on('chat_loaded', update_display);
-
-    context.registerContextModifier(add_summary_to_context);
+    
+    // *** THE FIX: The correct method is context.contextProcessors.push ***
+    context.contextProcessors.push(add_summary_to_context);
 
     log('Extension setup complete.');
   } catch (err) {

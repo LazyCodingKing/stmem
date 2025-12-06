@@ -1,0 +1,134 @@
+.memory-summarize-panel {
+  padding: 15px;
+  border-radius: 8px;
+  margin: 10px 0;
+  background: var(--bg2);
+  border: 1px solid var(--border-color);
+}
+
+.memory-summarize-panel h3 {
+  margin-top: 0;
+  margin-bottom: 15px;
+  color: var(--text-color);
+}
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  margin-bottom: 12px;
+  gap: 10px;
+}
+
+.settings-row label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  cursor: pointer;
+}
+
+.settings-row input[type="checkbox"],
+.settings-row input[type="number"],
+.settings-row input[type="text"],
+.settings-row select {
+  padding: 5px 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: var(--bg1);
+  color: var(--text-color);
+}
+
+.settings-row input[type="checkbox"] {
+  cursor: pointer;
+  width: 18px;
+  height: 18px;
+}
+
+.settings-row input[type="number"],
+.settings-row input[type="text"] {
+  width: 80px;
+  margin-left: auto;
+  flex-grow: 1;
+}
+
+.settings-row select {
+  margin-left: auto;
+  min-width: 120px;
+}
+
+.button-row {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-start;
+}
+
+.btn-primary,
+.btn-danger {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: bold;
+  transition: all 0.2s ease;
+}
+
+.btn-primary {
+  background: var(--primary-color);
+  color: white;
+}
+
+.btn-primary:hover:not(:disabled) {
+  filter: brightness(0.9);
+}
+
+.btn-danger {
+  background: var(--error);
+  color: white;
+}
+
+.btn-danger:hover:not(:disabled) {
+  filter: brightness(0.9);
+}
+
+.btn-primary:disabled,
+.btn-danger:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.status-display {
+  padding: 10px;
+  background: var(--bg3);
+  border-left: 4px solid var(--primary-color);
+  border-radius: 4px;
+  margin: 10px 0;
+  font-size: 14px;
+}
+
+/* Make errors more visible */
+.status-display.error {
+    border-left-color: var(--error);
+    color: var(--error);
+}
+
+.stats-display {
+  padding: 10px;
+  background: var(--bg1);
+  border-radius: 4px;
+  margin: 10px 0;
+  font-size: 13px;
+}
+
+.stat-item {
+  padding: 5px 0;
+}
+
+.stat-item strong {
+  margin-right: 8px;
+}
+
+hr {
+  border: none;
+  border-top: 1px solid var(--border-color);
+  margin: 15px 0;
+}

@@ -190,6 +190,205 @@ function set_chat_memory(data) {
     saveMetadataDebounced();
 }
 
+// --- Memory History Management ---
+function get_memory_history() {
+    const memory = get_chat_memory();
+    return memory.history || [];
+}
+
+function add_to_memory_history(summary, messageCount) {
+    const memory = get_chat_memory();
+    if (!memory.history) memory.history = [];
+    
+    memory.history.push({
+        summary: summary,
+        timestamp: Date.now(),
+        messageCount: messageCount,
+        id: Date.now() + Math.random()
+    });
+    
+    // Keep only last 50 entries
+    if (memory.history.length > 50) {
+        memory.history = memory.history.slice(-50);
+    }
+    
+    set_chat_memory(memory);
+}
+
+// --- Memory Viewer Interface ---
+class MemoryViewerInterface {
+    constructor() {
+        this.popup = null;
+        this.$content = null;
+        this.isOpen = false;
+    }
+
+    html_template = `
+<div id="titan_memory_viewer">
+    <div class="flex-container justifyspacebetween alignitemscenter" style="margin-bottom: 15px;">
+        <h3 style="margin: 0;">📋 Memory History</h3>
+        <button id="viewer-refresh" class="menu_button" title="Refresh">
+            <i class="fa-solid fa-refresh"></i>
+        </button>
+    </div>
+    
+    <div id="viewer-stats" style="padding: 10px; background: rgba(0,100,255,0.1); border-radius: 5px; margin-bottom: 15px;">
+        <div><strong>Current Memory:</strong> <span id="stat-current-size">0</span> characters</div>
+        <div><strong>Total Updates:</strong> <span id="stat-total-updates">0</span></div>
+        <div><strong>Messages Processed:</strong> <span id="stat-messages-processed">0</span></div>
+    </div>
+
+    <hr>
+
+    <div id="viewer-current" style="margin-bottom: 20px;">
+        <h4>Current Active Memory</h4>
+        <div class="titan-memory-card">
+            <div class="memory-card-content" id="current-memory-text">No memory yet</div>
+            <div class="memory-card-actions">
+                <button class="copy-btn" data-action="copy-current" title="Copy to clipboard">
+                    <i class="fa-solid fa-copy"></i>
+                </button>
+                <button class="edit-btn" data-action="edit-current" title="Edit">
+                    <i class="fa-solid fa-edit"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <hr>
+
+    <h4>Memory History (Most Recent First)</h4>
+    <div id="viewer-history" style="max-height: 400px; overflow-y: auto;">
+        <!-- History entries will be inserted here -->
+    </div>
+</div>
+`;
+
+    async show() {
+        const ctx = getContext();
+        this.popup = new ctx.Popup(this.html_template, ctx.POPUP_TYPE.TEXT, undefined, {
+            wider: true,
+            okButton: 'Close'
+        });
+        
+        this.$content = $(this.popup.content);
+        this.$content.closest('dialog').css('min-width', '70%');
+        
+        this.setupEventListeners();
+        this.updateContent();
+        
+        this.isOpen = true;
+        await this.popup.show();
+        this.isOpen = false;
+    }
+
+    setupEventListeners() {
+        const self = this;
+        
+        // Refresh button
+        this.$content.find('#viewer-refresh').on('click', () => {
+            this.updateContent();
+            toast('Memory viewer refreshed', 'info');
+        });
+
+        // Copy buttons
+        this.$content.on('click', '.copy-btn', function() {
+            const action = $(this).data('action');
+            const text = $(this).closest('.titan-memory-card').find('.memory-card-content').text();
+            navigator.clipboard.writeText(text);
+            toast('Copied to clipboard', 'success');
+        });
+
+        // Edit current memory
+        this.$content.on('click', '[data-action="edit-current"]', function() {
+            const $card = $(this).closest('.titan-memory-card');
+            const $content = $card.find('.memory-card-content');
+            const currentText = $content.text();
+            
+            const $textarea = $(`<textarea class="titan_textarea" style="width: 100%; min-height: 100px;">${currentText}</textarea>`);
+            $content.replaceWith($textarea);
+            
+            const $saveBtn = $(`<button class="save-edit-btn" style="margin-top: 5px;">Save</button>`);
+            $(this).replaceWith($saveBtn);
+            
+            $saveBtn.on('click', function() {
+                const newText = $textarea.val();
+                set_chat_memory({ summary: newText, updated_at: Date.now() });
+                refresh_memory_injection();
+                renderVisuals();
+                toast('Memory updated', 'success');
+                self.updateContent();
+            });
+        });
+
+        // Delete history entry
+        this.$content.on('click', '.delete-btn', function() {
+            const id = $(this).data('id');
+            const memory = get_chat_memory();
+            if (memory.history) {
+                memory.history = memory.history.filter(h => h.id !== id);
+                set_chat_memory(memory);
+                self.updateContent();
+                toast('History entry deleted', 'info');
+            }
+        });
+    }
+
+    updateContent() {
+        const memory = get_chat_memory();
+        const history = get_memory_history();
+        
+        // Update stats
+        this.$content.find('#stat-current-size').text(memory.summary?.length || 0);
+        this.$content.find('#stat-total-updates').text(history.length);
+        this.$content.find('#stat-messages-processed').text(memory.last_index || 0);
+        
+        // Update current memory
+        const currentText = memory.summary || 'No memory yet';
+        this.$content.find('#current-memory-text').text(currentText);
+        
+        // Update history
+        const $historyContainer = this.$content.find('#viewer-history');
+        $historyContainer.empty();
+        
+        if (history.length === 0) {
+            $historyContainer.append('<p style="opacity: 0.6;">No history entries yet</p>');
+        } else {
+            // Show in reverse order (most recent first)
+            const reversedHistory = [...history].reverse();
+            reversedHistory.forEach(entry => {
+                const date = new Date(entry.timestamp).toLocaleString();
+                const $entry = $(`
+                    <div class="titan-memory-card" style="margin-bottom: 10px;">
+                        <div class="memory-card-header">
+                            <span class="memory-card-date">${date}</span>
+                            <span class="memory-card-info">(${entry.messageCount} messages)</span>
+                        </div>
+                        <div class="memory-card-content">${this.escapeHtml(entry.summary)}</div>
+                        <div class="memory-card-actions">
+                            <button class="copy-btn" title="Copy">
+                                <i class="fa-solid fa-copy"></i>
+                            </button>
+                            <button class="delete-btn" data-id="${entry.id}" title="Delete">
+                                <i class="fa-solid fa-trash"></i>
+                            </button>
+                        </div>
+                    </div>
+                `);
+                $historyContainer.append($entry);
+            });
+        }
+    }
+
+    escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+}
+
+const memoryViewerInterface = new MemoryViewerInterface();
+
 // --- UI Updates ---
 function updateUI() {
     if (!document.querySelector('#titan-settings')) return;
@@ -206,34 +405,12 @@ function updateUI() {
     const currentCount = ctx.chat?.length || 0;
     const pending = Math.max(0, currentCount - lastIndex);
 
-    // Calculate token savings
-    let totalTokens = 0;
-    let savedTokens = 0;
-    
-    if (ctx.chat && ctx.chat.length > 0) {
-        for (let msg of ctx.chat) {
-            const tokens = count_tokens(msg.mes);
-            totalTokens += tokens;
-        }
-        
-        // Calculate how many tokens would be saved by pruning
-        const buffer = get_settings('buffer_size');
-        const pruneLimit = Math.max(0, lastIndex - buffer);
-        for (let i = 0; i < Math.min(pruneLimit, ctx.chat.length); i++) {
-            savedTokens += count_tokens(ctx.chat[i].mes);
-        }
-    }
-
     const $status = $('#titan-status');
     if ($status.length) {
         if (isProcessing) {
-            $status.html(`<i class="fa-solid fa-spinner fa-spin"></i><span>Processing...</span>`);
+            $status.text(`Status: Processing...`);
         } else {
-            let statusText = `Ready. ${pending} pending`;
-            if (savedTokens > 0 && get_settings('pruning_enabled')) {
-                statusText += ` | Saving ~${savedTokens} tokens`;
-            }
-            $status.html(`<i class="fa-solid fa-circle-check"></i><span>${statusText}</span>`);
+            $status.text(`Status: Ready. ${pending} new messages pending.`);
         }
     }
 }
@@ -331,19 +508,10 @@ function handle_pruning() {
     if (pruneLimit > 0) {
         debug(`Pruning messages: indices 0-${pruneLimit} will be hidden`);
         
-        // Mark old messages to be excluded from context
         for (let i = 0; i < Math.min(pruneLimit, chat.length); i++) {
             if (!chat[i].extra) chat[i].extra = {};
             chat[i].extra.exclude_from_context = true;
         }
-        
-        // Calculate token savings
-        let pruned_tokens = 0;
-        for (let i = 0; i < Math.min(pruneLimit, chat.length); i++) {
-            pruned_tokens += count_tokens(chat[i].mes);
-        }
-        
-        debug(`Pruned ${pruneLimit} messages, saving ~${pruned_tokens} tokens`);
     }
 }
 
@@ -386,12 +554,10 @@ async function run_summarization() {
 
         const existingMemory = memory.summary || "No history yet.";
 
-        // Build prompt
         let promptText = get_settings('prompt_template');
         promptText = promptText.replace('{{EXISTING}}', existingMemory);
         promptText = promptText.replace('{{NEW_LINES}}', newLines);
 
-        // Format for API type
         let apiPrompt;
         if (isChatCompletionAPI()) {
             debug(`Using Chat Completion (API: ${main_api})`);
@@ -402,9 +568,7 @@ async function run_summarization() {
         }
 
         debug(`Generating summary for ${newMessages.length} new messages`);
-        log(`Prompt length: ${promptText.length} characters`);
 
-        // Add timeout to prevent hanging
         const timeoutPromise = new Promise((_, reject) =>
             setTimeout(() => reject(new Error('API call timeout (30s)')), 30000)
         );
@@ -430,13 +594,15 @@ async function run_summarization() {
             throw new Error("Generated summary was empty");
         }
 
-        // Truncate if too long
         const maxLen = get_settings('max_summary_length');
         if (cleanResult.length > maxLen) {
             cleanResult = cleanResult.substring(0, maxLen) + "...";
         }
 
         debug(`Summary generated: ${cleanResult.length} characters`);
+
+        // Add to history before updating
+        add_to_memory_history(cleanResult, chat.length);
 
         set_chat_memory({
             summary: cleanResult,
@@ -553,7 +719,6 @@ function setup_ui() {
         set_settings('prompt_template', default_settings.prompt_template);
         $('#titan-prompt-template').val(default_settings.prompt_template);
         toast('Prompt reset to default', 'info');
-        debug('Prompt reset to default');
     });
 
     $('#titan-toggle-chat').on('click', () => {
@@ -569,7 +734,6 @@ function setup_ui() {
         refresh_memory_injection();
         renderVisuals();
         toast('Memory saved manually', 'success');
-        debug('Manual save completed');
     });
 
     $('#titan-now').on('click', () => {
@@ -583,13 +747,18 @@ function setup_ui() {
                 summary: '',
                 last_index: 0,
                 updated_at: Date.now(),
+                history: []
             });
             refresh_memory_injection();
             renderVisuals();
             updateUI();
             toast('Memory wiped', 'info');
-            debug('Memory wiped');
         }
+    });
+
+    // NEW: View Memory History button
+    $('#titan-view-history').on('click', () => {
+        memoryViewerInterface.show();
     });
 
     debug('UI setup complete');
@@ -597,17 +766,16 @@ function setup_ui() {
 
 async function load_settings_html() {
     try {
-        // Get the extension directory dynamically
         const extensionDir = new URL(import.meta.url).pathname;
         const extensionPath = extensionDir.substring(0, extensionDir.lastIndexOf('/'));
         const settingsPath = `${extensionPath}/settings.html`;
         
         const response = await fetch(settingsPath);
-        if (!response.ok) throw new Error(`HTTP ${response.status} - Could not load ${settingsPath}`);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const html = await response.text();
         $('#extensions_settings2').append(html);
         setup_ui();
-        log('Settings UI loaded successfully');
+        log('Settings UI loaded');
     } catch (e) {
         error(`Failed to load settings.html: ${e.message}`);
     }
@@ -617,17 +785,14 @@ async function load_settings_html() {
 jQuery(async function () {
     log(`Loading extension...`);
 
-    // Initialize settings
     initialize_settings();
     settings = structuredClone(extension_settings[MODULE_NAME]);
 
-    // Load settings HTML
     await load_settings_html();
 
     const ctx = getContext();
     const eventTypes = ctx.eventTypes || ctx.event_types;
 
-    // Register event listeners
     log('Registering event listeners...');
     
     ctx.eventSource.on(eventTypes.USER_MESSAGE_RENDERED, () => {
@@ -650,11 +815,7 @@ jQuery(async function () {
         handle_pruning();
     });
 
-    log('Event listeners registered');
-
-    // Initial state
     if (ctx.chat && ctx.chat.length > 0) {
-        debug('Chat loaded, initializing...');
         requestAnimationFrame(() => {
             updateUI();
             refresh_memory_injection();
@@ -662,22 +823,14 @@ jQuery(async function () {
         });
     }
 
-    // Register message interceptor for token savings (like Qvink)
-    if (globalThis.getContext) {
-        log('Registering message interceptor for token optimization...');
-    }
-
     log(`Extension loaded successfully`);
 });
 
-// Message interceptor - removes pruned messages from context before sending to API
 globalThis.titan_memory_intercept = function (chat, _contextSize, _abort, type) {
     if (!is_chat_enabled() || !get_settings('pruning_enabled')) {
-        return; // Don't intercept if pruning disabled
+        return;
     }
 
-    debug('Intercepting messages for pruning...');
-    
     const memory = get_chat_memory();
     const lastIndex = memory.last_index || 0;
     const buffer = get_settings('buffer_size');
@@ -685,27 +838,15 @@ globalThis.titan_memory_intercept = function (chat, _contextSize, _abort, type) 
 
     if (pruneLimit <= 0) return;
 
-    // Skip the most recent message if it's a continue
     let start = chat.length - 1;
     if (type === 'continue') start--;
 
-    let pruned_count = 0;
-    let pruned_tokens = 0;
-
-    // Mark messages for exclusion
     for (let i = 0; i < Math.min(pruneLimit, chat.length); i++) {
         if (!chat[i].extra) chat[i].extra = {};
         
-        // Use ST's ignore symbol to exclude from context
         const IGNORE_SYMBOL = getContext().symbols?.ignore;
         if (IGNORE_SYMBOL) {
             chat[i].extra[IGNORE_SYMBOL] = true;
-            pruned_count++;
-            pruned_tokens += count_tokens(chat[i].mes);
         }
-    }
-
-    if (pruned_count > 0) {
-        debug(`Message interceptor: Pruned ${pruned_count} messages (~${pruned_tokens} tokens)`);
     }
 };

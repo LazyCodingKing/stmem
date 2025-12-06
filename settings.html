@@ -4,7 +4,7 @@
         <div class="inline-drawer-toggle inline-drawer-header">
             <div class="flex-container alignitemscenter margin0">
                 <b>🛡️ Titan Memory</b>
-                <span style="font-size: 0.75em; opacity: 0.6; margin-left: 8px;">v2.0</span>
+                <span style="font-size: 0.75em; opacity: 0.6; margin-left: 8px;">v2.1</span>
             </div>
             <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
         </div>
@@ -22,6 +22,11 @@
                         <i class="fa-solid fa-bolt" style="margin-right: 6px;"></i>Summarize Now
                     </button>
                 </div>
+
+                <!-- NEW: Memory History Viewer Button -->
+                <button id="titan-view-history" class="menu_button" style="width: 100%; margin-top: 10px;" title="View memory history and manage entries">
+                    <i class="fa-solid fa-history" style="margin-right: 6px;"></i>View Memory History
+                </button>
 
                 <hr>
 
@@ -310,6 +315,86 @@
     word-wrap: break-word;
     font-size: 0.85em;
     opacity: 0.85;
+}
+
+/* =============== MEMORY VIEWER STYLES =============== */
+
+.titan-memory-card {
+    background: var(--smart-theme-bg);
+    border: 1px solid var(--smart-theme-border);
+    border-radius: 6px;
+    padding: 12px;
+    margin-bottom: 10px;
+    transition: all 0.2s ease;
+}
+
+.titan-memory-card:hover {
+    border-color: var(--smart-theme-submit-bg);
+    box-shadow: 0 2px 8px rgba(0, 102, 255, 0.15);
+}
+
+.memory-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+    font-size: 0.85em;
+    opacity: 0.7;
+}
+
+.memory-card-date {
+    font-weight: 600;
+}
+
+.memory-card-info {
+    font-style: italic;
+}
+
+.memory-card-content {
+    background: rgba(0, 0, 0, 0.2);
+    padding: 10px;
+    border-radius: 4px;
+    margin-bottom: 8px;
+    line-height: 1.5;
+    font-size: 0.9em;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+
+.memory-card-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+}
+
+.memory-card-actions button {
+    padding: 6px 12px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    background: var(--smart-theme-submit-bg);
+    color: var(--smart-theme-submit-text);
+    font-size: 0.85em;
+    transition: all 0.2s ease;
+}
+
+.memory-card-actions button:hover {
+    filter: brightness(1.15);
+    transform: translateY(-1px);
+}
+
+.memory-card-actions .delete-btn {
+    background: #8b0000;
+}
+
+.save-edit-btn {
+    padding: 6px 12px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    background: #28a745;
+    color: white;
+    font-weight: 600;
 }
 
 /* Animation */

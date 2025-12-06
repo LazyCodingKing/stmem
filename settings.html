@@ -1,27 +1,20 @@
 <div class="titan-panel">
-    <h3>🛡️ Titan Memory v2.1</h3>
-    <div class="titan-desc">Rolling summarization with visual context.</div>
+    <h3>🛡️ Titan Memory v3 (Integrated)</h3>
+    <div class="titan-desc">
+        Uses your main SillyTavern connection. No API configuration required.
+    </div>
+    <hr>
 
-    <!-- Toggle & API -->
     <div class="titan-row">
-        <span>Enable Extension</span>
-        <input type="checkbox" id="titan-enabled" style="width: 18px; height: 18px;">
-    </div>
-    <div class="titan-row">
-        <span>API Endpoint</span>
-        <input type="text" id="titan-api" class="titan-input" placeholder="http://127.0.0.1:5000/api/v1/generate">
-    </div>
-     <div class="titan-row">
-        <span>API Key (Optional)</span>
-        <input type="password" id="titan-key" class="titan-input">
+        <span class="titan-label">Enable Extension</span>
+        <input type="checkbox" id="titan-enabled" style="width: 20px; height: 20px;">
     </div>
 
     <!-- Thresholds -->
     <div class="titan-section-title">Triggers</div>
     <div class="titan-row">
         <span>Summarize every N messages:</span>
-        <!-- Changed min to 1 to allow "Every Message" -->
-        <input type="number" id="titan-threshold" class="titan-input" style="max-width: 60px;" min="1">
+        <input type="number" id="titan-threshold" class="titan-input" style="max-width: 60px;" min="1" value="1">
     </div>
     <div class="titan-desc">Set to <b>1</b> to summarize after every reply.</div>
 
@@ -30,8 +23,6 @@
         <span>Show Memory in Chat</span>
         <input type="checkbox" id="titan-show-visuals" style="width: 18px; height: 18px;">
     </div>
-    <div class="titan-desc">Displays the current memory block at the bottom of the latest message.</div>
-
     <div class="titan-row">
         <span>Active Pruning (Reduce Tokens)</span>
         <input type="checkbox" id="titan-pruning" style="width: 18px; height: 18px;">

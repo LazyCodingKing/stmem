@@ -1,10 +1,13 @@
 {
-  "name": "Titan Memory",
-  "version": "7.0.0",
-  "author": "LazyCodingKing",
-  "description": "Native memory manager. Uses SillyTavern's internal generation engine.",
-  "js": "index.js",
-  "css": ["style.css"],
+    "display_name": "qvink_memory",
+    "loading_order": 1,
+    "requires": [],
+    "optional": [],
+    "minimum_client_version": "1.13.2",
+    "js": "index.js",
+    "css": "style.css",
+    "author": "qvink",
+    "version": "1.2.7",
   "html": "settings.html",
   "generate_interceptor": "titan_intercept_messages"
 }

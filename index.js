@@ -227,7 +227,10 @@ function renderVisuals(errorMsg = null) {
     const $chat = $('#chat');
     const $lastMsg = $chat.children('.mes').last();
 
-    if ($lastMsg.length === 0) return;
+    if ($lastMsg.length === 0) {
+        debug('No messages in chat to attach memory to');
+        return;
+    }
 
     // Remove existing nodes
     $('.titan-chat-node').remove();
@@ -244,17 +247,23 @@ function renderVisuals(errorMsg = null) {
         </div>`;
     } else if (memory.summary) {
         html = `<div class="titan-chat-node">
-            <div class="titan-chat-header"><i class="fa-solid fa-brain"></i> Memory</div>
+            <div class="titan-chat-header"><i class="fa-solid fa-brain"></i> 📝 Memory</div>
             <div class="titan-memory-content">${escapeHtml(memory.summary)}</div>
         </div>`;
+        debug('Rendered memory in chat');
+    } else {
+        debug('No memory to display yet');
+        return;
     }
 
     if (html) {
         const $textBlock = $lastMsg.find('.mes_text');
         if ($textBlock.length) {
             $textBlock.after(html);
+            debug('Memory appended to message');
         } else {
             $lastMsg.append(html);
+            debug('Memory appended to message container');
         }
     }
 }
@@ -409,21 +418,36 @@ async function run_summarization() {
 
 // --- Event Handlers ---
 function on_new_message() {
-    if (!is_chat_enabled()) return;
-    if (!get_settings('auto_summarize')) return;
+    debug('on_new_message triggered');
+    
+    if (!is_chat_enabled()) {
+        debug('Chat memory not enabled, skipping');
+        return;
+    }
+    
+    if (!get_settings('auto_summarize')) {
+        debug('Auto-summarize disabled, skipping');
+        return;
+    }
 
     const ctx = getContext();
+    if (!ctx.chat || ctx.chat.length === 0) {
+        debug('No chat or empty chat');
+        return;
+    }
+
     const memory = get_chat_memory();
     const lastIndex = memory.last_index || 0;
-    const currentCount = ctx.chat?.length || 0;
+    const currentCount = ctx.chat.length;
     const diff = currentCount - lastIndex;
 
-    debug(`New message detected. Pending: ${diff}/${get_settings('threshold')}`);
+    debug(`New message detected. Last: ${lastIndex}, Current: ${currentCount}, Diff: ${diff}, Threshold: ${get_settings('threshold')}`);
 
     if (diff >= get_settings('threshold')) {
         debug('Threshold reached, triggering summarization');
         run_summarization();
     } else {
+        debug(`Not at threshold yet (${diff}/${get_settings('threshold')})`);
         refresh_memory_injection();
         requestAnimationFrame(() => renderVisuals());
     }
@@ -560,13 +584,33 @@ jQuery(async function () {
     const eventTypes = ctx.eventTypes || ctx.event_types;
 
     // Register event listeners
-    ctx.eventSource.on(eventTypes.USER_MESSAGE_RENDERED, on_new_message);
-    ctx.eventSource.on(eventTypes.CHARACTER_MESSAGE_RENDERED, on_new_message);
-    ctx.eventSource.on(eventTypes.CHAT_CHANGED, on_chat_changed);
-    ctx.eventSource.on(eventTypes.GENERATION_STARTED, handle_pruning);
+    log('Registering event listeners...');
+    
+    ctx.eventSource.on(eventTypes.USER_MESSAGE_RENDERED, () => {
+        debug('USER_MESSAGE_RENDERED fired');
+        on_new_message();
+    });
+    
+    ctx.eventSource.on(eventTypes.CHARACTER_MESSAGE_RENDERED, () => {
+        debug('CHARACTER_MESSAGE_RENDERED fired');
+        on_new_message();
+    });
+    
+    ctx.eventSource.on(eventTypes.CHAT_CHANGED, () => {
+        debug('CHAT_CHANGED fired');
+        on_chat_changed();
+    });
+    
+    ctx.eventSource.on(eventTypes.GENERATION_STARTED, () => {
+        debug('GENERATION_STARTED fired');
+        handle_pruning();
+    });
+
+    log('Event listeners registered');
 
     // Initial state
     if (ctx.chat && ctx.chat.length > 0) {
+        debug('Chat loaded, initializing...');
         requestAnimationFrame(() => {
             updateUI();
             refresh_memory_injection();
